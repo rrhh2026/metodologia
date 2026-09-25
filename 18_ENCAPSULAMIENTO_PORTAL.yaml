@@ -22,6 +22,7 @@ estado: COMPLETADO
 4. `API_BASE` frontend = prefijo API del módulo
 5. Backend Hono montado en ese mismo prefijo API + `getEffectiveUser` + `api_rest_log`
 6. SSO por `?token=` + `carnet` en localStorage
+7. Iconos `lucide-svelte` (un import por vista, `size={18}` en nav)
 
 ## Ejemplo completo — módulo `vacaciones` (copiar y renombrar)
 
@@ -227,7 +228,30 @@ vacacionesRouter.post('/', async (c) => {
 </div>
 ```
 
-### 6. Checklist de montaje (no dar por hecho sin esto)
+### 6. Iconos `lucide-svelte` (como requisiciones)
+
+```bash
+npm i lucide-svelte
+```
+
+Un import por vista, solo los iconos que usa (no `import *`):
+
+```svelte
+<script lang="ts">
+  import { Layers, PlusCircle, BarChart3, Clock } from 'lucide-svelte';
+</script>
+
+<button class="nav-item" onclick={() => selectView('mias')}>
+  <Layers size={18} /> Mis Vacaciones
+</button>
+<button class="btn btn-primary" onclick={onNew}>
+  <PlusCircle size={16} /> Nueva Solicitud
+</button>
+```
+
+Reglas: `size={18}` en nav, `size={16}` en botones. Nada de emojis en el nav (los títulos del `top-navbar` sí pueden llevar emoji, como requisiciones).
+
+### 7. Checklist de montaje (no dar por hecho sin esto)
 
 ```
 [ ] base en vite.config.ts = /portal/<modulo>/
