@@ -1,0 +1,91 @@
+---
+tarea: metodologia-03_test_ux_opcional
+proyecto: metodologia
+topic_key: system/metodologia
+version: 2.0.0
+origen: /opt/apps/metodologia/03_TEST_UX_OPCIONAL.md
+titulo: "TEST UX OPCIONAL — Experiencia de Usuario / Visual (no bloqueante)"
+formato: yaml
+estado: migrado
+---
+## Contenido migrado de /opt/apps/metodologia/03_TEST_UX_OPCIONAL.md
+
+# TEST UX OPCIONAL — Experiencia de Usuario / Visual (no bloqueante)
+
+**Tipo:** Test opcional, no bloqueante. No sustituye a las 3 capas funcionales. Complementa.
+**Nombre:** `test ux` — experiencia de usuario / visual regression ligero
+**Cuándo se usa:** Cuando el usuario quiere validar que la página **se ve bien** (no descuadrada), además de que el botón funciona. Es invento local, validado contra prácticas 2026 de Playwright.
+
+## Por qué existe
+
+Tu idea: *"no hablo si el botón funciona, hablo del diseño de la página no esté descuadrada"*. Eso es **visual regression** + **layout check**. En 2026 es estándar con Playwright via `toHaveScreenshot()` — no requiere servicio externo (BrowserStack/Percy/Chromatic son opcionales para equipos grandes). La web confirma:
+
+- Playwright 1.60 (mayo 2026) trae `toHaveScreenshot()` nativo, con diff configurable, masking y `animations: 'disabled'` (fuente: scrolltest.com, browserstack guide 2026).
+- La práctica 2026 es empezar con Playwright nativo local, luego si hay 100+ screenshots pasar a Chromatic/Percy para review UI. Para tu caso local, nativo alcanza.
+- **No confundir:** visual regression no dice si el diseño es *bueno*, solo si *cambió* respecto a la baseline aprobada. Necesita baseline humano previo (mockup aprobado regla 26).
+
+## Qué verifica este test opcional (no bloqueante)
+
+| Chequeo | Pregunta | Cómo |
+|---------|----------|------|
+| Foto vs baseline | ¿Se descuadró algo? | `expect(page).toHaveScreenshot('dashboard.png', {maxDiffPixelRatio:0.02})` |
+| No tapa/no desborda | ¿Algo se superpone o se sale? | `getBoundingBox()` + `toBeInViewport()`, `overflow` |
+| Responsive | ¿En mobile se rompe? | Misma página en 1280/768/375 y foto por viewport |
+| Estabilidad | ¿Animación/toast no genera flake? | `animations:'disabled', caret:'hide', mask:[toast, fecha]` |
+
+## Reglas (alineadas con tu metodología)
+
+1. **Opcional y no bloqueante:** Si falla, no bloquea deploy. Se reporta como `UX_WARN`, no `FAIL`. El batallón de falsos positivos no lo cuenta como crítico.
+2. **Baseline en Docker:** Generar baselines dentro del mismo Docker que CI, no en tu laptop. Si no, difiere por fuentes/DPI (fuente: qatribe.in 2026 - mayor error al iniciar).
+3. **Enmascarar dinámico:** Fechas, horas, `stockBajo` que cambian cada minuto → `mask` o `maxDiffPixels`. Si no, 5-10% falsos positivos y la suite muere.
+4. **Capturar poco, no todo:** No fotografiar 800 páginas. Solo 3-5 vistas críticas: `login`, `dashboard`, `solicitudes`, `bodega`. (trampa #1: capturar todo)
+5. **1 worker, sin reintentos** igual que tus flujos transaccionales, para no duplicar estado visual.
+6. **Screenshot a `/tmp/opencode/`** igual que tus tests actuales, no tocar iptables.
+
+## Patrón mínimo (copiar/pegar)
+
+```ts
+// e2e/flows/ux-dashboard.spec.ts — opcional
+import { test, expect } from '@playwright/test';
+test.describe('UX opcional - no bloqueante', () => {
+  test('dashboard se ve bien en desktop', async ({ page }) => {
+    await page.goto('http://127.0.0.1:5173/', { waitUntil: 'domcontentloaded' });
+    await page.getByRole('button', { name: 'Iniciar sesión' }).waitFor(); // o tu login
+    await expect(page).toHaveScreenshot('dashboard-desktop.png', {
+      maxDiffPixelRatio: 0.02, // 2% tolerancia
+      animations: 'disabled',
+      caret: 'hide',
+      scale: 'css',
+      mask: [page.locator('.toast'), page.locator('time')],
+    });
+  });
+  test('solicitudes no se desborda en mobile', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto('http://127.0.0.1:5173/misSolicitudes', { waitUntil: 'domcontentloaded' });
+    const box = await page.getByRole('table').boundingBox();
+    expect(box.width).toBeLessThanOrEqual(375); // no desborda
+  });
+});
+```
+
+Config global recomendada (2026 checklist):
+```ts
+// playwright.config.ts
+expect: { toHaveScreenshot: { maxDiffPixelRatio: 0.02, animations: 'disabled', caret: 'hide', scale: 'css' } },
+use: { deviceScaleFactor: 1 },
+```
+
+## Integración con tu ciclo hormiguita
+
+- **No entra en el ciclo obligatorio** `PLAN->TAREA->PRUEBAS->COMPLETADA`. Es `TAREA_OPCIONAL_UX` que se deja corriendo en sub-agente fresco mientras vos haces otra tarea (tu idea de dilatar pero paralelizar).
+- **Bitácora:** `TAREA: UX_dashboard` con `VERIFICADO: screenshot vs baseline 2026-08-22, diff 0.8% OK` o `UX_WARN: diff 4% en sidebar`.
+- **Clasificación:** si falla, es `UX_WARN` (diseño), no `BUG_UI` (función). No se cuenta para `meta: 0 errores de contexto`.
+
+## Fuentes web verificadas (2026)
+- Playwright Visual Regression Testing: Built-In Guide 2026 (bug0.com)
+- Visual Regression Testing 2026: Playwright, Chromatic (scrolltest.com 2026-06)
+- Playwright Visual Regression Testing Complete Guide (qatribe.in 2026-07) — false positive >5-10% = revisar config
+- BrowserStack Guide Visual Regression Using Playwright (2026-06-17)
+
+## Regla de oro de este test
+Si el visual falla pero las 3 capas funcionales pasan, el negocio sigue vendiendo. Si las 3 capas fallan pero el visual pasa, el negocio está roto aunque se vea bonito. Por eso es **opcional**: suma, no sustituye.

@@ -1,0 +1,152 @@
+---
+tarea: metodologia-07_engram_memoria
+proyecto: metodologia
+topic_key: system/metodologia
+version: 2.1.0
+origen: /opt/apps/metodologia/07_ENGRAM_MEMORIA.md
+titulo: "07 — ENGRAM: MEMORIA PERSISTENTE POR PROYECTO Y MÓDULO"
+formato: yaml-frontmatter+markdown
+estado: migrado
+---
+## Contenido migrado de /opt/apps/metodologia/07_ENGRAM_MEMORIA.md
+
+# 07 — ENGRAM: MEMORIA PERSISTENTE POR PROYECTO Y MÓDULO
+
+> Cómo usamos Engram sin ensuciar la memoria. Un edificio, muchos departamentos.
+
+## 1. Modelo mental (el que te faltaba)
+
+```
+Project  = EDIFICIO (un repo, una app)       → pino2, configcode, planer-portal, inventario-2
+topic_key = DEPARTAMENTO (módulo dentro)     → sales/pricing, sales/orders, inventory/kardex, finance/cash-shift
+type      = TIPO DE MEMORIA                  → architecture | bugfix | decision | discovery | pattern | config
+```
+
+**Engram NO separa por módulo con `project`.** `project` es la frontera de aislamiento
+físico (detectado por `cwd` + `git` o por `ENGRAM_PROJECT`). La separación por módulo
+es lógica, con `topic_key` DENTRO del mismo project.
+
+Crear un `project` por cada módulo (`pino2-sales`, `pino2-inventory`) es anti-patrón:
+explota en N bases, rompe `search` cruzado y duplica contexto. No hacerlo.
+
+## 2. Reglas duras (no negociables)
+
+### 2.1 Dónde pararse
+- NUNCA laburar desde `/root`. Siempre `cd /opt/apps/<proyecto>` o `/root/<proyecto>` ANTES de invocar al agente.
+- Si no podés moverte, exportar `ENGRAM_PROJECT=nombre` en la shell. El agente lee esa env y pisa `cwd`.
+- Verificar al inicio de cada sesión: `engram projects list` y `engram context <proyecto>`. Si ves `root` con 1176 prompts huérfanos, estás parado mal.
+
+### 2.2 Cuándo guardar (`mem_save` obligatorio)
+El agente guarda SIN que se lo pidas después de:
+- Decisión de arquitectura o tradeoff
+- Bug corregido (qué, por qué, dónde)
+- Descubrimiento no obvio / gotcha
+- Cambio de config o entorno
+- Patrón o convención establecida
+
+Formato fijo:
+```
+title:  Verbo + qué  (ej: "Fijé autoridad de precios en ventas")
+type:   architecture | bugfix | decision | discovery | pattern | config
+topic_key: dominio/modulo  (ej: sales/pricing)
+content:
+  **What**: una línea — qué se hizo
+  **Why**:  motivo (pedido, bug, performance)
+  **Where**: archivos/paths afectados
+  **Learned**: gotchas, bordes (omitir si no hay)
+```
+
+### 2.3 Convención de `topic_key` por proyecto
+
+Usar el mismo `topic_key` cuando el TEMA evoluciona (upsert). Si dudás, llamar `mem_suggest_topic_key` y reutilizarlo.
+
+**pino2** (`/opt/apps/pino2`):
+```
+sales/pricing | sales/orders | sales/returns | sales/process
+inventory/kardex | inventory/counts | inventory/adjustments | inventory/transfers
+finance/cash-shift | finance/arqueos | finance/ar | finance/ap | finance/collections
+catalog/products | catalog/barcodes | catalog/prices
+clients/credits | clients/contracts
+routes/delivery | routes/settlement
+auth/users | auth/roles
+sync/offline | sync/inbox
+```
+
+**configcode / planer-portal / inventario-2**: misma lógica `dominio/modulo` dentro de su project.
+
+Ejemplos reales:
+```bash
+engram save "Fijé autoridad de precios en ventas" \
+  --project pino2 --type architecture --topic-key sales/pricing \
+  "What: rechacé customUnitPrice sin capacidad discounts.apply..."
+
+engram save "Fix ventas CARD sin cash_shift_id" \
+  --project pino2 --type bugfix --topic-key finance/cash-shift \
+  "What: CARD buscaba turno solo para CASH y dejaba NULL..."
+```
+
+### 2.4 Cuándo buscar
+- Al inicio de TODA tarea nueva: `engram search "<keyword>" --project <proyecto> --limit 5`
+- Si el usuario dice "recordás", "cómo lo hicimos", "qué decidimos" → `mem_context` → `mem_search` → `mem_get_observation`
+- Búsqueda por módulo: `engram search "kardex" --project pino2` (filtra por topic_key implícito en contenido)
+
+### 2.5 Cierre de sesión obligatorio
+Antes de decir "listo/hecho", el agente hace `mem_session_summary` con:
+```
+## Goal
+## Instructions
+## Discoveries
+## Accomplished
+## Next Steps
+## Relevant Files
+```
+Sin esto, la próxima sesión arranca ciega (regla 29: el DOCUMENTO manda, pero la memoria acelera).
+
+## 3. Diagnóstico rápido
+
+```bash
+engram doctor --json --project <proyecto>   # 3/4 ok es sano; blocked por sync no afecta local
+engram projects list                         # ver distribución real
+engram context <proyecto>                    # ver últimas 5-10 obs del proyecto
+engram search "" --project <proyecto> --limit 3  # sanity check
+```
+
+**Caso actual verificado 2026-08-24:**
+- `configcode 354 obs`, `planer-portal 126`, `pino2 108`, `root 54 obs / 1176 prompts`, `inventario-2 10`
+- `0 topic_key` en uso → causa directa de "no separa por módulo"
+- `2 prompts vacíos (seq 1861, 2679)` bloquean `cloud sync` pero NO el uso local — `sqlite WAL ok, 0 bloqueos`
+
+## 4. Qué NO hacer
+- No crear projects para módulos.
+- No guardar prompts vacíos (generan `sync_mutation_required_fields: content` y bloquean cloud).
+- No confiar en memoria saturada (>150k tokens): compactar o delegar a sub-agente fresco (regla 23).
+- No usar `root` como project de trabajo: es el tacho de lo que no se pudo clasificar.
+
+## 5. Evaporación — memoria con TTL (regla 37)
+
+Engram ya expone `review_after` / `needs_review`. Usarlo como feromona:
+
+- **Guardar con TTL implícito:** `architecture/decision` → 7d, `pattern/config` → 14d,
+  `bugfix/discovery` → 7d. El agente NO setea TTL manual salvo caso especial.
+- **Al iniciar tarea (RAG manual):** `engram search ...` → si un hit viene con
+  `lifecycle: needs_review`, NO usarlo como verdad. Re-validar contra el doc
+  (`00_METODO_TRABAJO.yaml` o SP) y solo si sigue vigente hacer `mem_review mark_reviewed`.
+- **Comando:** `engram review list --project <proyecto>` lista los evaporados.
+  `engram doctor --json` muestra `needs_review` count. Meta <10% stale.
+
+Ver `00_METODO_TRABAJO.yaml:Regla 37` y `scripts/evaporar.sh` para HANDOFFs.
+
+## 6. Checklist hormiguita para Engram
+
+```
+[ ] cd /opt/apps/<proyecto> antes de empezar
+[ ] engram search "<módulo>" --project <proyecto>  (RAG manual + memoria)
+[ ] filtrar hits needs_review → re-validar contra DOCUMENTO (regla 29) antes de usar
+[ ] definir topic_key dominio/modulo al crear la tarea
+[ ] mem_save con topic_key al cerrar cada micro-tarea verificada
+[ ] mem_session_summary al cerrar sesión
+[ ] engram doctor --json si algo raro (sync blocked es ok local)
+[ ] engram review list --project <proyecto>  (evaporados semanales, regla 37)
+```
+
+Fuente: esta carpeta es fuente de verdad (regla 29). Si Engram dice otra cosa, manda este doc.

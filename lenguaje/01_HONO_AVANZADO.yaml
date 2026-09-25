@@ -1,0 +1,159 @@
+---
+tarea: guia-hono-avanzado
+proyecto: metodologia
+topic_key: system/lenguaje/hono
+version: 1.0.0
+titulo: "HONO 4 — Guía de Arquitectura Avanzada, Patrones de Producción y Rendimiento Extremo"
+formato: yaml
+estado: activo
+---
+# HONO 4 — GUÍA DE ARQUITECTURA AVANZADA Y PRODUCCIÓN
+
+## 1. Fundamentos & Ventajas Competitivas
+- **Latencia Zero-Overhead:** Basado en RegExpRouter (el router más rápido de JavaScript).
+- **Multi-Runtime:** Ejecuta idénticamente en Node.js 20+, Bun, Cloudflare Workers, Deno y AWS Lambda.
+- **Tipado RPC End-to-End (`hc`):** Inferencia automática de tipos desde las rutas del servidor hacia el cliente frontend sin generar código ni compilar OpenAPI.
+- **Memoria Mínima:** ~40-60 MB en producción (frente a 150-250 MB de NestJS/Express).
+
+---
+
+## 2. Tipado Estricto de Contexto (`Hono<{ Variables, Bindings }>`)
+```ts
+import { Hono } from 'hono';
+
+export type AppEnv = {
+  Variables: {
+    user: { carnet: string; email: string; role: string };
+    requestId: string;
+    startTime: number;
+  };
+  Bindings: {
+    DATABASE_URL: string;
+    JWT_SECRET: string;
+  };
+};
+
+export const app = new Hono<AppEnv>();
+```
+
+---
+
+## 3. Middleware de Observabilidad No Bloqueante (Metodología 04 + 05)
+```ts
+import type { MiddlewareHandler } from 'hono';
+
+export const observabilityLogger: MiddlewareHandler<AppEnv> = async (c, next) => {
+  const start = Date.now();
+  c.set('startTime', start);
+  const method = c.req.method;
+  const url = c.req.url;
+  const path = c.req.path;
+
+  // Clonado de stream seguro para captura de payload sin agotar buffer
+  let reqBody: any = null;
+  const contentType = c.req.header('content-type') || '';
+  if (['POST', 'PUT', 'PATCH'].includes(method) && contentType.includes('application/json')) {
+    try {
+      const cloned = c.req.raw.clone();
+      const rawText = await cloned.text();
+      if (rawText.trim()) reqBody = JSON.parse(rawText);
+    } catch {}
+  }
+
+  let errorMessage: string | null = null;
+  let errorStack: string | null = null;
+
+  try {
+    await next();
+  } catch (err: any) {
+    errorMessage = err?.message || 'Error no controlado';
+    errorStack = err?.stack || null;
+    throw err;
+  } finally {
+    const durationMs = Date.now() - start;
+    const statusCode = c.res ? c.res.status : (errorMessage ? 500 : 200);
+
+    // Inserción asíncrona no bloqueante
+    queueMicrotask(async () => {
+      try {
+        await sql`
+          INSERT INTO api_request_logs (
+            log_level, method, url, route_pattern, status_code, duration_ms,
+            user_id, request_body, error_message, error_stack
+          ) VALUES (
+            ${statusCode >= 500 ? 'ERROR' : statusCode >= 400 ? 'WARN' : 'INFO'},
+            ${method}, ${url}, ${c.req.routePath || path}, ${statusCode}, ${durationMs},
+            ${c.get('user')?.carnet || null}, ${reqBody ? JSON.stringify(reqBody) : null},
+            ${errorMessage}, ${errorStack}
+          );
+        `;
+      } catch {}
+    });
+  }
+};
+```
+
+---
+
+## 4. Validación Declarativa con Zod OpenAPI (`@hono/zod-validator`)
+```ts
+import { z } from 'zod';
+import { zValidator } from '@hono/zod-validator';
+
+const SolicitudSchema = z.object({
+  carnetSolicitante: z.string().min(4).max(20),
+  nombreCapacitacion: z.string().min(5).max(200),
+  categoria: z.enum(['TECNICA', 'BLANDAS', 'SEGURIDAD', 'NORMATIVA']),
+  costoEstimado: z.number().positive().optional(),
+  duracionHoras: z.number().int().min(1).max(300)
+});
+
+app.post('/api/solicitudes', zValidator('json', SolicitudSchema, (result, c) => {
+  if (!result.success) {
+    return c.json({ success: false, errors: result.error.flatten() }, 400);
+  }
+}), async (c) => {
+  const data = c.req.valid('json'); // Infiere tipo exacto de Zod
+  const created = await db.insert(solicitudes).values(data).returning();
+  return c.json({ success: true, data: created[0] }, 201);
+});
+```
+
+---
+
+## 5. Streaming de Binarios (PDF y Excel) en `@hono/node-server`
+```ts
+// Retorno en streaming sin buffering de memoria masivo
+app.get('/api/reporte/pdf', async (c) => {
+  const pdfBuffer = await generarPdfStream();
+  return new Response(pdfBuffer as any, {
+    status: 200,
+    headers: {
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': 'inline; filename="reporte.pdf"',
+      'Content-Length': pdfBuffer.length.toString()
+    }
+  });
+});
+```
+
+---
+
+## 6. Server-Sent Events (SSE) y Notificaciones en Tiempo Real
+```ts
+import { streamSSE } from 'hono/streaming';
+
+app.get('/api/firmas/notificaciones-en-vivo', async (c) => {
+  return streamSSE(c, async (stream) => {
+    while (true) {
+      const nuevasFirmas = await obtenerFirmasPendientes();
+      await stream.writeSSE({
+        data: JSON.stringify(nuevasFirmas),
+        event: 'firmas-update',
+        id: String(Date.now())
+      });
+      await stream.sleep(3000);
+    }
+  });
+});
+```

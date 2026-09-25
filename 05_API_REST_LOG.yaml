@@ -1,0 +1,81 @@
+---
+tarea: metodologia-05_api_rest_log
+proyecto: metodologia
+topic_key: system/metodologia
+version: 2.1.0
+origen: /opt/apps/metodologia/05_API_REST_LOG.md
+titulo: "05 — API REST LOG — Registro Estructurado de Cada Petición (OBLIGATORIO SÍ O SÍ)"
+formato: yaml-frontmatter+markdown
+estado: migrado
+---
+## Contenido migrado de /opt/apps/metodologia/05_API_REST_LOG.md
+
+# 05 — API REST LOG — Registro Estructurado de Cada Petición (OBLIGATORIO SÍ O SÍ)
+
+**Tipo:** OBLIGATORIO SÍ O SÍ en todo sistema, sin excepción. No bloqueante para el flujo pero SÍ bloqueante para auditoría. Complementa a `04`. **Regla del usuario: todo backend debe tener log detallado para que cualquier IA pueda ver y corregir en vez de andar a ciegas.**
+
+**Si no hay `api_request_logs`, el sistema está a ciegas — ninguna IA (humana o artificial) puede diagnosticar sin reproducir.**
+
+## Por qué existe
+
+Tu idea de `api_rest_log` es **observabilidad sin APM externo**: cada `GET/POST/PUT/DELETE` que entra a `api_request_logs` queda con `method/url/route_pattern/status_code/duration_ms/user_id/store_id/request_body/response_body/error_message/error_stack` para poder responder *"¿qué pasó?"* sin reproducir. En pino2 ya está implementado en `backend/src/modules/api-logs/api-logs.service.ts:1-301` y `backend/src/database/database.service.ts:1-330` `ApiLoggerInterceptor`.
+
+## Qué registra (campos mínimos `04:10`)
+
+| Columna | Tipo | Ejemplo pino2 |
+|---------|------|---------------|
+| `id` | uuid | `gen_random_uuid()` |
+| `log_level` | varchar(10) | `ERROR/WARN/SLOW/EMPTY` + `flags TEXT[]` |
+| `method` | varchar(10) | `GET` |
+| `url` / `route_pattern` | text / varchar(250) | `/api/sales` / `/sales/:id` |
+| `status_code` | smallint | `200/400/500` |
+| `duration_ms` | integer | `23` |
+| `user_id` / `user_email` / `user_role` | uuid / varchar | `uuid / a@b.com / cashier` |
+| `store_id` | uuid | RLS tenant |
+| `request_body` / `response_body` / `query_params` | jsonb | Payload sanitizado sin password |
+| `error_message` / `error_stack` / `error_code` | text / varchar(60) | `FK violation` + stack |
+| `created_at` | timestamp | `NOW()` |
+
+**Implementación pino2:** `api-logs.service.ts:1-301` con `findAll:11` filtrado por `logLevel/method/statusCode/userId/storeId/url/flag/dateFrom/dateTo` + paginado `limit 200` + `COUNT` paralelo, `findOne:120` con `request_body`, `getStats:132` con 6 agregaciones `SUM FILTER` `topErrors/topSlow/topUsers/errorsByHour/topEmpty`, y `cleanup:260` `DELETE < 30d`.
+
+## Cómo se usa (hormiguita)
+
+1. **Interceptor no bloqueante:** `ApiLoggerInterceptor` en `backend/src/app.module.ts:128` `APP_INTERCEPTOR` captura `method/url/duration_ms/user/store` y hace `INSERT` async sin bloquear la respuesta — si falla el log, la venta no falla.
+2. **Retención:** `@Cron('0 2 * * *')` `DELETE FROM api_request_logs WHERE created_at < NOW() - INTERVAL '7 days'` `04:59` — 7 días, no 30, para no llenar PG con `jsonb`. Pino2 tiene `cleanup:260` con `daysOlderThan 30` — ajustar a 7.
+3. **Consulta en diagnóstico:** Cuando un E2E falla capa 3 `SELECT stockDespues`, el helper debe hacer `SELECT error_message, error_stack FROM api_request_logs WHERE url ILIKE '%/sales/process%' ORDER BY created_at DESC LIMIT 5` `04:50` para traer la causa sin suposiciones.
+4. **Slow query separado:** `04:32` `consultasql_historial` con `duration >1000ms` + `EXPLAIN ANALYZE` — no mezclar con `api_request_logs` que es por request, no por query.
+
+## Reglas
+
+- **No bloquear:** `try/catch` alrededor del `INSERT` de log — un `jsonb` mal formado no revierte la transacción de venta.
+- **Sanitizar:** Nunca loguear `password_hash` / `refresh_token` — `request_body` con `password` enmascarado.
+- **Indexar:** `idx_api_request_logs_created_at DESC` + `log_level` + `status_code` `migration 2026-08-23` — sin índice, `getStats` con 6 `Promise.all` se vuelve `SLOW` ella misma.
+
+## Patrón mínimo (copiar/pegar para nuevo proyecto)
+
+```ts
+// api-logger.interceptor.ts
+@Injectable()
+export class ApiLoggerInterceptor implements NestInterceptor {
+  intercept(ctx, next) {
+    const start = Date.now();
+    return next.handle().pipe(tap({
+      next: (data) => this.log(ctx, Date.now()-start, 200, data),
+      error: (err) => this.log(ctx, Date.now()-start, err.status, null, err),
+    }));
+  }
+  private async log(ctx, duration_ms, status_code, body, err?) {
+    try { await this.db.query(`INSERT INTO api_request_logs(method,url,route_pattern,status_code,duration_ms,user_id,store_id,request_body,error_message) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, [method,url,pattern,status_code,duration_ms,userId,storeId,reqBody,err?.message]); } catch {}
+  }
+}
+```
+
+## Integración con testing
+
+- En `01_TESTING_UI_PLAYWRIGHT.yaml` helper `sqlOne('SELECT error_message FROM api_request_logs WHERE status_code >=400 ORDER BY created_at DESC LIMIT 1')` tras `page.waitForResponse` fallido — te da el `500` real sin mirar logs del servidor.
+
+## Fuentes pino2
+
+- `backend/src/modules/api-logs/api-logs.service.ts:1-301` — implementación real
+- `backend/migrations/2026-08-23_ensure_operational.sql:1` — DDL `api_request_logs`
+- `metodologia/04_AUDITORIA_LOGS_Y_CONSULTAS_LENTAS.yaml:1-68` — principio fundamental

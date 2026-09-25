@@ -1,0 +1,51 @@
+---
+tarea: metodologia-15_reinvencion_continua
+proyecto: metodologia
+topic_key: system/adaptacion
+version: 1.0.0
+titulo: "15 — REINVENCION CONTINUA — Bun/Elysia/Eden vs Hono + SQL Server/PG"
+formato: yaml-frontmatter+markdown
+estado: activo
+origen: chat investigativo 2026-09-11 (hcmoracle + metodologia)
+mentalidad: "Siempre adelante: el paso importa pero futuro y presente se mejoran. Todo evoluciona, nace cosa nueva. Reinventarse y adaptarse."
+---
+# 15 — REINVENCION CONTINUA (investigacion 2026-09-11)
+
+> Principio del usuario: ir siempre un paso adelante. Lo que anda no se reescribe,
+> lo nuevo se prueba en chico. PG = proyecto personal. SQL Server = empresa (usuario decide).
+
+## Descartado por VPS (1-5)
+- Neon branching / neon_local / Testcontainers / Actions / Time Travel: buena tech,
+  pero suma RAM/containers al VPS. NO aplicar en VPS actual. Queda en roadmap si hay
+  servidor de test dedicado. Ver `14_COMPARATIVA_Y_MEJORAS_FUTURAS.yaml:71-74`.
+
+## Lo investigado (web 2026, verificado)
+- **Bun 1.3-1.4:** -25-40% RAM, boot 34-45ms vs 287ms Node, imagen 134MB vs 287MB.
+  En CRUD real con PG +3% nomas (cuello = BD). Riesgo: 4.7k issues vs 1.7k Node,
+  leak WebSocket, APM parcial. Uso: CI + sync nuevo aislado, no legacy que pagea.
+- **Elysia 2 beta:** bundle 736->344KB (AOT 226KB/141KB min), startup -30%,
+  Exact Mirror <2% overhead. Solo Bun. Comunidad: 18k stars / 461k down/sem.
+- **Eden Treaty:** cero codegen, REST tipado. Trampa si aparece mobile/partner.
+  Prod: servir `dist/types.d.ts` estatico (1-5ms) no on-the-fly (50-200ms).
+- **Hono (ya en uso):** 30k stars / 33-38M down/sem (73-80x Elysia), 14KB core,
+  multi-runtime Node/Bun/Deno/Workers. Default pragmatico.
+- **tRPC vs gRPC:** tRPC = TS-only JSON sin codegen (DX). gRPC = .proto binario
+  HTTP/2 polyglot 11+ lenguajes, +54% throughput, -60-80% payload, streaming real.
+  Hibrido 2026: tRPC front->BFF, gRPC BFF->servicios, REST al publico.
+- **Svelte + Hono + gRPC:** solo via ConnectRPC (`hono-connectrpc` + `@connectrpc/connect-web`
+  + `buf` generate). SSR en `+page.server.ts`. Sin proxy Envoy.
+
+## Decision (usuario)
+- Nuevo chico: **Hono REST JSON + Zod + OpenAPI (Scalar)**.
+- Personal PG: + **Drizzle + postgres.js** (7.4KB gzip vs Prisma 600KB).
+- Empresa MSSQL: + **`node-mssql` + Zod** directo a SPs (127 SPs mandan).
+  Drizzle MSSQL solo beta/RC (FOR JSON, 2016+). Kysely o Prisma si se quiere builder.
+  Drizzle NO para MSSQL prod hoy.
+- **Zod** = valida entrada antes del SP (evita H02/H14). **OpenAPI** = contrato.
+  **Scalar** = docs moderna (reemplazo Swagger UI).
+- Nest JSON -> Hono: 4 archivos -> 15 lineas por endpoint. No migrar lo que anda.
+
+## Regla de oro
+> Si no esta en YAML con topic_key, no existe para Engram.
+> Probar lo nuevo en un sync aislado (vacantes/historial), medir RAM/boot,
+> y solo entonces promover a patron. Nunca en bloque sobre legacy.

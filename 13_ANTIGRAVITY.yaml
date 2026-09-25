@@ -1,0 +1,41 @@
+---
+tarea: metodologia-13_antigravity
+proyecto: metodologia
+topic_key: system/metodologia
+version: 1.0.0
+titulo: "13 — ANTIGRAVITY HORMIGUITA — Sub-agentes Frescos, Relevos HANDOFF y Observabilidad Obligatoria"
+formato: yaml
+estado: activo
+---
+# 13 — ANTIGRAVITY HORMIGUITA (Reglas Operativas para Agentes de Código)
+
+## 📌 Principio Fundamental
+El modelo opera como **Hormiguita Senior**: trabaja una sola unidad verificable a la vez, evita cambios en bloque sin relevo, mantiene un contexto liviano mediante sub-agentes frescos y registra evidencia real contra base de datos.
+
+---
+
+## 1. Reglas Duras de Antigravity
+
+1. **RAG Obligatorio antes de codificar:**
+   - Leer los documentos de metodología en `/opt/apps/metodologia/` relevantes antes de implementar.
+   - Consultar memoria Engram (`engram context <proyecto>` o `engram search <termino> --project <proyecto>`).
+
+2. **Observabilidad Activa (Metodología 04 + 05):**
+   - Todo backend debe registrar cada petición HTTP en `api_request_logs` con `id`, `method`, `url`, `route_pattern`, `status_code`, `duration_ms`, `user_id`, `user_email`, `request_body` sanitizado, `error_message`, `error_stack`.
+   - Toda consulta SQL con `duration_ms > 1000` debe interceptarse y registrarse en `consultasql_historial` con `caller_context` exacto.
+   - Retención automática nocturna de 7 días.
+
+3. **Verificación de 3 Capas (Metodología 01 + 02):**
+   - **Capa 1:** El elemento UI existe, es interactivo y reacciona al usuario.
+   - **Capa 2:** El estado de la aplicación cambia (URL, toasts, feedback reactivo, respuesta HTTP 200/201).
+   - **Capa 3:** La base de datos persiste el cambio real (`SELECT count(*)` antes vs después). Un stub o mock no cuenta.
+   - **Casos Inválidos Obligatorios:** Probar que formularios con campos requeridos vacíos bloqueen el avance y NO alteren la base de datos (`countAntes === countDespues`).
+
+4. **Relevos y HANDOFFs por Módulo (Metodología 00 + 09):**
+   - Cada tarea o feature debe documentarse en su respectivo `HANDOFF_<modulo>.yaml` con frontmatter estructurado (`tarea`, `proyecto`, `topic_key`, `estado`, `coordinador`, `avance`, `verificado`, `donde_quedo`).
+
+5. **Trazabilidad Git con Conventional Commits:**
+   - Realizar commits atómicos con formato `feat(...)`, `fix(...)`, `test(...)`, `docs(...)`.
+
+6. **Memoria Engram Canónica (Metodología 07):**
+   - Registrar observaciones estructuradas con `What / Why / Where / Learned` bajo los `topic_keys` canónicos del proyecto.

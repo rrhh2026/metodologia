@@ -1,0 +1,254 @@
+---
+tarea: metodologia-00_metodo_trabajo
+proyecto: metodologia
+topic_key: system/metodologia
+version: 2.1.0
+origen: /opt/apps/metodologia/00_METODO_TRABAJO.md
+titulo: "METODO DE TRABAJO - LA HORMIGUITA (general)"
+formato: yaml-frontmatter+markdown
+estado: migrado
+---
+## Contenido migrado de /opt/apps/metodologia/00_METODO_TRABAJO.md
+
+# MÉTODO DE TRABAJO — "LA HORMIGUITA" (general)
+
+Aplica a TODOS los proyectos. Una tarea chica a la vez, verificada antes de
+pasar a la siguiente. No cambios rápidos ni en bloque.
+
+## Ciclo base
+
+```
+PLAN -> TAREA ESPECÍFICA -> PRUEBAS -> COMPLETADA ->
+ACTUALIZAR CHECKLIST -> SIGUIENTE TAREA
+```
+
+- **UNA tarea a la vez**: la unidad verificable más pequeña (un SP, una tabla,
+  un endpoint, un fix). No encadenar varias en un turno.
+- **Declarar antes de ejecutar**: en 1-2 líneas, qué tarea y cuál es su prueba
+  de éxito.
+- **Cada tarea pasa el ciclo completo** antes de seguir. No "compila y ya":
+  se verifica el efecto real (SQL ejecutado, endpoint respondido, build real).
+- **Completado real**: un stub NO cuenta. La operación debe ejecutarse contra
+  su fuente de verdad (SP canónico / SQL parametrizado / endpoint real).
+
+## Reglas clave (de la skill metodo-trabajo)
+
+- **20. RAG manual + Engram `07`**: LEER el archivo fuente al inicio de cada micro-tarea. No
+  depender de la memoria de conversación. Hacer `engram search` por `topic_key` (`sales/pricing`, `inventory/kardex`) en el `project` correcto ANTES de codificar — la memoria es RAG, no verdad.
+- **21. Cadena larga = sub-agentes frescos**: contexto limpio por bloque.
+- **22. Verificar el diff de cada sub-agente** (no aprobar a ciegas).
+- **23. Compactar si contexto >150-200k tokens** (señales: edit que no apunta,
+  mismo error repetido, olvidos). Delegar a sub-agente o sesión nueva.
+- **24. Medir errores de contexto por sesión** (meta: 0).
+- **25. Sub-agentes por complejidad**:
+  - Sencillo = 0 (no delegar)
+  - Rust = 1 | SQL = 2 | Pruebas = 2-4 | Diseño React solo = 0-1
+  - React + backend = 1 (todo el contexto en un agente)
+  - Nest = 2 | Flutter = igual que React
+- **26. Mockup primero**: el usuario ve el RESULTADO FINAL esperado y lo
+  aprueba ANTES de programar.
+- **27. Señales de contexto saturado** → delegar a sub-agente fresco o
+  compactar.
+- **28. Buscar FALSOS POSITIVOS** y lo "contado sin base". Exigir evidencia
+  real (código → dato → prueba que corrió).
+- **29. El DOCUMENTO manda** sobre mi memoria. Si dudo tras leer el doc,
+  PREGUNTAR al usuario.
+- **30. Consultar antes de cualquier borrado** (DROP/DELETE/TRUNCATE).
+  SELECT COUNT(*) antes/después. WHERE explícito. Soft-delete preferido.
+- **31. Batallón de falsos positivos**: 3-4 agentes de SOLO LECTURA en
+  paralelo, sectores ciegos, cada uno con TXT de hallazgos. El principal
+  verifica solo los CRITICO.
+- **32. Tres niveles de verificación**: (1) batallón de lectura, (2) endpoints
+  por ROL, (3) simulación de negocio E2E. Los bugs de encadenamiento (orden,
+  estados, versiones) solo salen en E2E.
+
+## Sub-agentes frescos y RELEVO (handoff) — el corazón del método
+
+El objetivo NO es solo "usar sub-agentes": es que el AGENTE PRINCIPAL (este
+chat) se mantenga como COORDINADOR LIVIANO con contexto chico y limpio. Así
+nunca llega al punto de corromperse (errores de edición, olvidos, contexto
+saturado). Los sub-agentes hacen el trabajo pesado y, si se saturan, se lo
+PASAN a otro sub-agente fresco.
+
+### Cómo funciona el ciclo
+
+```
+PRINCIPAL (coordina, verifica, no acumula trabajo pesado)
+   │  entrega tarea con contrato claro
+   ▼
+SUB-AGENTE 1 (contexto fresco) → trabaja la pieza → verifica → actualiza la BITÁCORA
+   │  si se satura a mitad o termina, la BITÁCORA tiene el estado exacto
+   ▼
+SUB-AGENTE 2 (contexto fresco) → LEE la bitácora → continúa donde quedó 1
+   │
+   ▼
+PRINCIPAL VERIFICA el diff de cada sub-agente con evidencia propia (regla 22)
+```
+
+### Reglas del relevo
+
+1. **UNA bitácora por tarea** (`HANDOFF_<tarea>.yaml`), NO un archivo por pieza.
+   Es la fuente de verdad del avance. La actualiza CADA sub-agente al terminar.
+2. **Estructura fija de la bitácora**:
+   ```
+   TAREA: <nombre>
+   COORDINADOR: <piezas definidas P1/P2/P3...>
+   ÚLTIMO AGENTE: <sub-agente N, fecha/hora>
+   ESTADO: <pendiente / en_progreso / pieza_X_hecha / completada / bloqueada>
+   AVANCE: <qué se hizo, con archivos/objetos>
+   ERRORES: <qué falló y por qué>
+   VERIFICADO: <qué se probó con SELECT/build reales, qué NO>
+   DÓNDE QUEDÓ: <exactamente qué sigue para el próximo sub-agente>
+   ```
+3. **Acotar el alcance por sub-agente**: ~1-3 archivos o 1-2 SPs por agente.
+   Si la tarea toca más, PARTIRLA. No delegar "todo el módulo".
+4. **Exigir verificación por pieza** (SELECT/build real), no solo al final.
+   Si un agente no puede verificar una pieza, debe DECIRLO (no declararla hecha).
+5. **Verificar contra la fuente, no contra el reporte**: el principal comprueba
+   con su PROPIA query/build que cada objeto declarado existe. Un reporte "todo
+   listo" NO es evidencia.
+6. **Si el sub-agente se satura**: señales = no verifica las piezas, reporta en
+   bloque, o deja "pendiente" sin explicación. Cortar, actualizar la bitácora y
+   re-delegar la pieza a OTRO sub-agente fresco (nunca re-usar el contexto
+   saturado).
+7. **Backup ANTES de tocar SPs/funciones** (guardar el original en
+   /tmp/opencode/backup_sp/) para restaurar si algo se pierde.
+
+### Por qué esto protege al chat principal
+
+- El principal NO acumula las cientos de tool-calls del trabajo grande → su
+  contexto queda bajo → no se corrompe.
+- La bitácora es el relevo: aunque un sub-agente se corte a mitad, el siguiente
+  retoma desde DÓNDE QUEDÓ sin repetir ni perder.
+- El principal solo COORDINA (define piezas, entrega contrato + bitácora) y
+  VERIFICA cada diff con evidencia propia.
+
+### Aplicación práctica (lo que hacemos hoy)
+
+- Pruebas de UI largas (venta, cierre de caja, tiempos) → se delegan a un
+  sub-agente fresco con contrato detallado (entrada, salida, qué NO tocar).
+- El sub-agente corre Playwright, verifica en BD (3 capas) y entrega un TXT
+  con resultado + evidencia. El principal revisa el diff y decide si pasa o
+  se re-delega.
+- Si el sub-agente reporta un bug → el principal lo clasifica (UI/backend/test)
+  y, si toca backend+frontend, lo delega a UN sub-agente con TODO el contexto
+  (regla 25) para que no haya incoherencias.
+
+## Verificación de la cadena real
+
+Para cada endpoint declarado: `ruta en router → handler → repos::fn → SP/tabla
+existente`, y el mapeo de errores (52xxx → HTTP) conectado. Correr estos
+greps en CADA fase, no al final.
+
+## Regla 37 — Evaporación (feromona con TTL) — biomímesis
+
+Todo rastro sin refuerzo se evapora. Aplica a HANDOFF y a memoria Engram.
+
+**HANDOFF (`HANDOFF_<tarea>.yaml`):**
+- TTL = 7 días sin `mtime` ni `ESTADO` actualizado. Pasado el TTL, el próximo
+  `evaporar` lo marca `ESTADO: evaporado` y agrega `EVAPORADO: YYYY-MM-DD (7d sin refuerzo)`.
+- Un HANDOFF evaporado NO se borra: queda como trazabilidad pero NO se usa como
+  fuente para el siguiente sub-agente. Si se retoma, se re-activa manual a `en_progreso`.
+- Script: `metodologia/scripts/evaporar.sh --check` (lista candidatos) y `--apply` (marca).
+
+**Engram (`mem_review`):**
+- Cada `mem_save` con `topic_key` tiene `review_after` implícito (7d por defecto
+  para `decision/architecture`, 14d para `pattern/config`). Pasado, queda
+  `needs_review` — no es verdad, es contexto stale hasta re-validar.
+- Al inicio de cada tarea (regla 20): `engram search` + filtrar `needs_review`
+  y re-validar contra el documento antes de usar. Si sigue vigente, `mark_reviewed`.
+
+Métrica: `HANDOFFs evaporados / HANDOFFs totales` y `memorias needs_review`
+por `engram doctor --json`. Meta: <10% stale. Ver `07_ENGRAM_MEMORIA.yaml`.
+
+## Regla 38 — Exploradora vs Explotadora (10% biomímesis)
+
+Toda colonia manda ~10% de exploradoras aleatorias a buscar atajos. Sin ellas,
+la colonia converge al óptimo local y nunca encuentra el global.
+
+**Cuándo:** cada 10 tareas hormiguita completadas, o 1 vez por semana si el
+proyecto está activo. No en cada tarea — es overhead deliberado 10%.
+
+**Quién:** 1 sub-agente de SOLO LECTURA (no toca código/BD), con contrato:
+```
+entrada: project, últimos api_request_logs + consultasql_historial (>1s)
+salida:  exploradora_<fecha>.txt con [ATAJO|SOSPECHOSO|NO-ES-ATAJO] + evidencia
+```
+
+**Qué busca (orden):**
+1. `consultasql_historial.duration_ms >1000` → `EXPLAIN ANALYZE` → índice faltante / Seq Scan
+2. `api_request_logs.duration_ms >1000` + `status 200` (lento pero no error)
+3. SPs duplicados o SQL parametrizado repetido sin índice (`grep repos::` + `pg_stat_user_indexes`)
+4. Oportunidad de vista materializada / índice compuesto
+
+**Qué NO hace:** no modifica plan/checklist ni aplica índices. Solo propone.
+El principal decide si el atajo se convierte en una TAREA hormiguita nueva
+(1 índice = 1 tarea, verificada con `EXPLAIN` antes/después).
+
+Ver `08_EXPLORADORA.yaml` para contrato completo y `scripts/exploradora.sh`.
+
+## Regla 39 — Autorización y alcance explícitos
+
+Antes del PLAN, declarar si se autoriza solo lectura o implementación y cuál es
+el alcance verificable:
+
+```
+authorize: read-only | implementacion
+hago: <lo comprometido, verificable>
+no-hago: <lo que queda afuera explícitamente>
+```
+
+1. `authorize: read-only` (explicar, investigar, revisar, comparar): solo leer y
+   responder. No tocar código/BD, crear HANDOFF, modificar checklist ni commitear.
+   Sin artefactos durables.
+2. `authorize: implementacion`: iniciar el ciclo PLAN → TAREA → PRUEBAS solo
+   cuando `hago` y `no-hago` estén definidos. El PLAN incluye la prueba de éxito.
+3. Si aparece un "ya que estoy", no se incorpora: va como tarea nueva al checklist.
+4. Al cerrar, mostrar `authorize` usado, resultado frente a `hago` y confirmar
+   con `git status --short` / diff que no se tocó `no-hago`. Para read-only,
+   confirmar que no hubo cambios.
+5. Métricas: desbordes de alcance y sesiones read-only con cambios no autorizados.
+   Meta: 0.
+
+## Regla 40 — Misión por proyecto (fin en mente a nivel proyecto)
+
+Misión general de esta metodología: hacer la cosa BIEN, sin importar el costo,
+pero siendo EFICIENTE también. Calidad primero, desperdicio cero.
+
+1. Cada proyecto declara en su doc base `mision:` (1 línea, para qué existe) +
+   `no-es:` (qué no es / qué no hace). Se lee al inicio de sesión (regla 20).
+2. Si una tarea no sirve a la `mision`, se cuestiona antes de hacerla (como el
+   PDI redundante descartado por mockup). No se construye lo que nadie necesita.
+3. Verificación: el PLAN de cada tarea cita la `mision` que sirve en 1 línea.
+4. Métrica: funciones descartadas en mockup vs construidas en vano. Meta: 0 en vano.
+
+## Regla 41 — Work-unit commits: cada tarea cierra con commit (de ODD)
+
+Un `[x]` se puede mentir, un hash no. Cada pieza verificada cierra con 1 commit
+atómico ANTES de pasar a la siguiente (branch primero si estás en main):
+
+```
+VERIFICADO: P1 SELECT count 33->32 OK, commit a3f9c1d
+```
+
+1. Un commit = una conducta entregable (fix, SP, endpoint, migration, docs de
+   ese cambio). NO commitear por tipo (`models`, `services`, `tests` sueltos
+   que solos no andan).
+2. Tests + docs van EN EL MISMO commit que la conducta que verifican.
+3. El mensaje cuenta la historia (Conventional: `feat(...)`, `fix(...)`,
+   `test(...)`): qué outcome, no la lista de archivos.
+4. Rollback razonable: revertir ese commit no rompe trabajo ajeno. Anotar el
+   boundary (qué archivos/conducta se pueden sacar sin tocar lo demás).
+5. Evidencia obligatoria en el HANDOFF: comando de test enfocado + resultado
+   exacto + comando/harness runtime + resultado (o `N/A` con motivo).
+6. Si el cambio supera ~400 líneas authored (adds+dels, sin generados), partir
+   en PRs encadenados antes de seguir (ver skill `chained-pr`). Excepción solo
+   con `size:exception` del maintainer.
+7. Verificación: `git diff --stat`, `git diff --cached --stat`,
+   `git log --oneline -5`. El review mira el diff congelado del commit, nunca
+   el checkbox.
+
+## Regla de oro
+
+No desplegar en bloque. Cambios a BD van primero a dev/Test. Producción solo
+con respaldo VERIFICADO (existe + pasa RESTORE VERIFYONLY + ruta correcta).

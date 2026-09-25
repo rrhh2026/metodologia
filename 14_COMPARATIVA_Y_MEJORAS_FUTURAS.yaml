@@ -1,0 +1,84 @@
+---
+tarea: metodologia-14_comparativa_y_mejoras_futuras
+proyecto: metodologia
+topic_key: system/comparativa
+version: 2.1.0
+titulo: "14 — COMPARATIVA CON LA INDUSTRIA Y HOJA DE RUTA DE MEJORAS FUTURAS"
+formato: yaml-frontmatter+markdown
+estado: completado
+---
+# 14 — COMPARATIVA CON LA INDUSTRIA Y HOJA DE RUTA DE MEJORAS FUTURAS
+
+Este documento registra formalmente la evaluación comparativa de la **Metodología Hormiguita** frente a los estándares de la industria (metodologías ágiles clásicas, frameworks de agentes de IA y el estado del arte de investigación), definiendo un **catálogo de posibles mejoras a futuro** para cuando los proyectos escalen en concurrencia, volumen o tamaño de equipo.
+
+---
+
+## 1. Matriz Comparativa Frente a la Industria
+
+| Dimensión | Metodología Hormiguita (v2.1) | Scrum / Agile Tradicional | Frameworks IA (CrewAI / AutoGen) | Estado del Arte (Anthropic / SWE-bench) |
+|---|:---:|:---:|:---:|:---:|
+| **Especialización para IA** | 🟢 **10/10** (Contexto liviano, relevos limpios) | 🔴 **1/10** (Diseñado en 2001 para humanos) | 🟡 **5/10** (Mucho rol ficticio, poca solidez) | 🟢 **9/10** (Patrones Orchestrator-Worker) |
+| **Verificación de Persistencia** | 🟢 **10/10** (3 Capas: `SELECT count(*)` delta) | 🟡 **5/10** (Mocks teóricos o criterio manual) | 🔴 **2/10** (Asume éxito si el código compila) | 🟢 **9/10** (E2E contra entorno real) |
+| **Economía de Tokens** | 🟢 **9/10** (Router cuantitativo, TOON/YAML) | 🔴 **N/A** (Mide story points humanos) | 🔴 **2/10** (Bucles de chat infinitos entre agentes) | 🟢 **9/10** (Context windows acotadas) |
+| **Gobernanza del Flujo** | 🟡 **6/10** (Basada en prompts y disciplina de texto) | 🟡 **5/10** (Ceremonias y tableros Jira) | 🟢 **9/10** (State machines en Python/LangGraph) | 🟢 **10/10** (Harnesses programáticos en CI) |
+| **Aislamiento en Tests** | 🟡 **5/10** (Escribe en BD de test sin rollback) | 🟡 **6/10** (Varía según el equipo) | 🔴 **2/10** (Sin noción de base de datos) | 🟢 **9/10** (Docker efímero o transacciones aisladas) |
+| **Escala de Equipos (5+ devs)** | 🟡 **5/10** (Diseñado para 1 dev + agentes IA) | 🟢 **8/10** (Diseñado para evitar colisiones humanas) | 🟡 **5/10** (Inestable en equipos grandes) | 🟢 **8/10** (Git-centric distribuido) |
+
+---
+
+## 2. Fortalezas Consolidadas (Ventaja Competitiva)
+
+1. **Destrucción del "Mock que miente" (Regla de las 3 Capas):**
+   - A diferencia del TDD tradicional que abusa de mocks y stubs sintéticos, la verificación de 3 capas exige mutación real en PostgreSQL (`countDespues === countAntes + 1`).
+2. **Patrón Coordinador Liviano vs Teatro de Agentes:**
+   - Evita la trampa de frameworks como CrewAI donde múltiples agentes discuten en bucle. El coordinador se mantiene en `<10-20k tokens` y delega a subagentes frescos desechables, alineado con las mejores prácticas publicadas por Anthropic.
+3. **Biomímesis Operativa:**
+   - **Regla 38 (Exploradora 90/10):** Auditoría en solo lectura sobre `consultasql_historial` y `api_request_logs` para optimización continua de índices.
+   - **Regla 37 (Evaporación con TTL de 7 días):** Poda automática de contexto rancio para evitar que bitácoras viejas contaminen sesiones nuevas.
+
+---
+
+## 3. Hoja de Ruta de Posibles Mejoras (Roadmap No Inmediato)
+
+> [!NOTE]
+> Estas mejoras no son bloqueantes para la operación actual. Están documentadas como guía de evolución técnica cuando el volumen de peticiones o la cantidad de desarrolladores lo requiera.
+
+### Mejora A: Transaccionalidad y Teardown en Pruebas de Capa 3
+* **Problema identificado:** Al correr pruebas E2E transaccionales de venta o cobro repetidamente, los registros se acumulan en la base de datos de test (`Bdplaner_Test`), alterando el stock y el histórico.
+* **Solución propuesta:**
+  - **Opción 1 (Rollback en fixture):** Abrir transacción `BEGIN` al inicio del test Playwright y ejecutar `ROLLBACK` en `test.afterEach()`, leyendo el delta dentro del contexto transaccional.
+  - **Opción 2 (Fixtures determinísticos con cleanup):** Asignar prefijos reservados a los IDs de prueba (ej. `sku: 'TEST-PROD-001'`) y ejecutar una rutina de teardown que restaure el stock base antes o después de cada ejecución.
+
+### Mejora B: De Reglas en Texto a Gobernanza por Código (Guardrails Programáticos)
+* **Problema identificado:** La metodología reside en archivos YAML/Markdown. Si un modelo sufre degradación de atención, podría intentar saltarse el checklist o asumir que un botón funciona sin correr la consulta SQL.
+* **Solución propuesta:**
+  - Implementar **Git Pre-commit Hooks** (`.husky` o scripts shell) que verifiquen:
+    1. Que no existan stubs en los archivos modificados (`TODO`, `mock_`, funciones vacías).
+    2. Que el archivo `HANDOFF_<tarea>.yaml` haya sido actualizado si la tarea tocó más de 2 archivos.
+    3. Que el frontmatter YAML de cualquier documentación pase `python3 -c "import yaml..."`.
+
+### Mejora C: Desacoplamiento de Observabilidad para Escala (>100 req/s)
+* **Problema identificado:** Guardar logs HTTP completos con `jsonb` en PostgreSQL (`api_request_logs`) compite por recursos de I/O contra las transacciones de negocio a medida que el tráfico crece.
+* **Solución propuesta:**
+  - **Fase actual (<50 req/s):** PostgreSQL con cron de purga nocturna a 7 días funciona de forma óptima a costo $0.
+  - **Fase de alto volumen:** Desviar `api_request_logs` a un almacén columnar optimizado para series temporales y logs (ej. ClickHouse, DuckDB local, o SQLite en partición WAL separada), liberando a PostgreSQL exclusivamente para transacciones ACID de negocio.
+
+### Mejora D: Token Tracking Automatizado en Router
+* **Problema identificado:** El Router de Decisión ([00_ROUTER.yaml](file:///opt/apps/metodologia/00_ROUTER.yaml)) utiliza estimaciones fijas de tokens (ej. 25-40k).
+* **Solución propuesta:**
+  - Conectar un interceptor en el CLI (`agy` / SDK) que registre el consumo real de tokens de cada turno en la bitácora `SESSION_LOG`, retroalimentando la tabla del router con promedios reales por tipo de tarea.
+
+### Mejora E: Entornos Efímeros para Trabajo Multiusuario
+* **Problema identificado:** La metodología está concebida para 1 desarrollador líder + agentes. En un equipo de varios programadores concurrentes, compartir una sola base de datos de pruebas provocaría colisiones.
+* **Solución propuesta:**
+  - Adoptar esquemas PostgreSQL independientes por desarrollador/rama (`CREATE SCHEMA branch_nombre`) o contenedores efímeros vía Docker/Testcontainers donde cada programador tenga su propia réplica limpia.
+
+---
+
+## 4. Criterio de Activación
+
+- **NO aplicar mientras:** El proyecto sea operado por un desarrollador líder coordinando agentes de IA, con suite de pruebas controlada y tráfico en rangos normales de operación.
+- **SÍ comenzar a aplicar cuando:**
+  1. Se integren 2 o más desarrolladores humanos al repositorio simultáneamente.
+  2. La suite de pruebas supere los 100 tests diarios acumulando basura en la BD.
+  3. El volumen de logs en PostgreSQL comience a degradar el tiempo de respuesta de las queries de negocio.

@@ -1,0 +1,192 @@
+---
+tarea: guia-diseno-sistemas-ui-patrones
+proyecto: metodologia
+topic_key: system/lenguaje/ui-design
+version: 1.0.0
+titulo: "PATRONES DE DISEÑO UI & DESIGN SYSTEMS — Interfaces Corporativas de Alto Impacto (Inspirado en shadcn-svelte y Bits UI)"
+formato: yaml
+estado: activo
+---
+# PATRONES DE DISEÑO UI & DESIGN SYSTEMS CORPORATIVOS
+
+## 1. Filosofía de Diseño: "Zero-Popup" y Máxima Densidad de Información
+En aplicaciones empresariales (ERP, CRM, RRHH, Portales de Operaciones), los modales/popups emergentes clásicos interrumpen el flujo mental del usuario y causan bugs de superposición en móviles.
+
+### Reglas de Oro de UX Corporativo:
+1. **Zero Popups Bloqueantes:** Usar **drawers laterales**, **paneles inline colapsables** o vistas dedicadas tipo expediente 360°.
+2. **Tablas de Alta Densidad con Micro-KPIs:** Encabezados con contadores en vivo, barras de progreso y pills de estado con código de color semántico.
+3. **Validación Reactiva Inline:** El usuario debe ver el feedback visual en tiempo real sin tener que presionar "Guardar" para descubrir un error.
+4. **Accesibilidad Nativa (WCAG AA):** Soporte total de teclado (`Tab`, `Escape`, `Enter`), roles ARIA y contraste visual accesible.
+
+---
+
+## 2. Design Tokens Corporativos (Variables CSS & Colores Claro)
+```css
+:root {
+  /* Marca Corporativa Claro */
+  --claro-red: #da291c;
+  --claro-red-hover: #b81e13;
+  --claro-red-light: #fef2f2;
+  --claro-red-border: #fca5a5;
+
+  /* Superficies y Neutros */
+  --bg-app: #f8fafc;
+  --bg-card: #ffffff;
+  --text-main: #0f172a;
+  --text-muted: #64748b;
+  --border-subtle: #e2e8f0;
+  --border-focus: #94a3b8;
+
+  /* Estados Semánticos */
+  --st-approved-bg: #dcfce7;
+  --st-approved-text: #15803d;
+  --st-pending-bg: #fef9c3;
+  --st-pending-text: #854d0e;
+  --st-rejected-bg: #fee2e2;
+  --st-rejected-text: #b91c1c;
+
+  /* Elevaciones & Radios */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.08);
+}
+```
+
+---
+
+## 3. Patrón 1: Wizard Paso a Paso Reactivo (4 Pasos sin Popups)
+```svelte
+<!-- Componente: WizardLayout.svelte -->
+<script lang="ts">
+  import { Check, ChevronRight } from 'lucide-svelte';
+  
+  let { currentStep = $bindable(1), steps, children } = $props();
+</script>
+
+<div class="wizard-container">
+  <!-- Stepper Header -->
+  <div class="wizard-steps-header">
+    {#each steps as step, index}
+      {@const stepNum = index + 1}
+      {@const isDone = currentStep > stepNum}
+      {@const isCurrent = currentStep === stepNum}
+      
+      <div class="step-indicator" class:done={isDone} class:current={isCurrent}>
+        <div class="step-circle">
+          {#if isDone}
+            <Check size={14} />
+          {:else}
+            <span>{stepNum}</span>
+          {/if}
+        </div>
+        <span class="step-label">{step.title}</span>
+      </div>
+      
+      {#if index < steps.length - 1}
+        <div class="step-divider" class:active={isDone}></div>
+      {/if}
+    {/each}
+  </div>
+
+  <!-- Contenido Dinámico del Paso -->
+  <div class="wizard-content-card">
+    {@render children()}
+  </div>
+</div>
+```
+
+---
+
+## 4. Patrón 2: Tabla de Datos con Filtros Reactivos & Paginación
+```svelte
+<script lang="ts">
+  let { data = [], searchPlaceholder = 'Buscar...', columns, onRowClick } = $props();
+  let query = $state('');
+  let page = $state(1);
+  let pageSize = $state(10);
+
+  let filtered = $derived(
+    data.filter((item: any) => 
+      Object.values(item).some(val => 
+        String(val).toLowerCase().includes(query.toLowerCase())
+      )
+    )
+  );
+
+  let pagedData = $derived(
+    filtered.slice((page - 1) * pageSize, page * pageSize)
+  );
+  let totalPages = $derived(Math.ceil(filtered.length / pageSize) || 1);
+</script>
+
+<div class="datatable-wrapper">
+  <!-- Barra de Filtros -->
+  <div class="table-toolbar">
+    <input 
+      type="search" 
+      bind:value={query} 
+      placeholder={searchPlaceholder} 
+      class="search-input" 
+    />
+    <span class="record-counter">{filtered.length} registros</span>
+  </div>
+
+  <!-- Tabla -->
+  <table class="corporate-table">
+    <thead>
+      <tr>
+        {#each columns as col}
+          <th>{col.label}</th>
+        {/each}
+      </tr>
+    </thead>
+    <tbody>
+      {#each pagedData as row}
+        <tr onclick={() => onRowClick?.(row)}>
+          {#each columns as col}
+            <td>
+              {#if col.render}
+                {@render col.render(row[col.key], row)}
+              {:else}
+                {row[col.key]}
+              {/if}
+            </td>
+          {/each}
+        </tr>
+      {/each}
+    </tbody>
+  </table>
+
+  <!-- Paginación -->
+  <div class="pagination-bar">
+    <button disabled={page === 1} onclick={() => page--}>Anterior</button>
+    <span>Página {page} de {totalPages}</span>
+    <button disabled={page === totalPages} onclick={() => page++}>Siguiente</button>
+  </div>
+</div>
+```
+
+---
+
+## 5. Patrón 3: Expediente 360° con Pestañas & Acciones Inline
+- **Cabecera Flotante:** Folio en badge grande, título del trámite, badge de estado y botones de exportación (PDF / Excel).
+- **Cuerpo con Pestañas:**
+  1. `Ficha Técnica`: Información detallada de la solicitud.
+  2. `Firmas & Sellos`: Circuito jerárquico visual con estados `APROBADO`, `PENDIENTE` y `RECHAZADO`.
+  3. `Nómina`: Tabla de colaboradores participantes.
+  4. `Evaluación`: Calificación de eficacia con estrellas.
+  5. `Bitácora & Notificaciones`: Auditoría de correos y avisos enviados.
+- **Acciones Rápidas:** Panel inferior inline para Aprobar, Devolver, Rechazar o Dictaminar sin abrir popups.
+
+---
+
+## 6. Recursos & Librerías de Referencia en GitHub
+1. **[shadcn-svelte (GitHub: huntabyte/shadcn-svelte)](https://github.com/huntabyte/shadcn-svelte):**
+   - Sistema de componentes basado en **Bits UI** + **Tailwind CSS**.
+   - Modelo *Copy-Paste*: El código fuente de los componentes reside directamente en tu proyecto para personalización total.
+2. **[Bits UI (GitHub: huntabyte/bits-ui)](https://github.com/huntabyte/bits-ui):**
+   - Primitivas headless accesibles (Dropdowns, Dialogs, Tooltips, Tabs, Accordions) nativas de Svelte 5.
+3. **[Lucide Icons (GitHub: lucide-icons/lucide)](https://github.com/lucide-icons/lucide):**
+   - Más de 1,400 iconos limpios y vectoriales optimizados para Svelte.

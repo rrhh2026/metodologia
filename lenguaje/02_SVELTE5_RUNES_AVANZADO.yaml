@@ -1,0 +1,145 @@
+---
+tarea: guia-svelte5-runes-avanzado
+proyecto: metodologia
+topic_key: system/lenguaje/svelte5
+version: 1.0.0
+titulo: "SVELTE 5 — Guía Avanzada de Runes, Patrones de Estado y Arquitectura Reactiva"
+formato: yaml
+estado: activo
+---
+# SVELTE 5 — GUÍA AVANZADA DE RUNES Y ARQUITECTURA REACTIVA
+
+## 1. El Paradigma de Runes (Adios `$:` y `let`, Hola Señales Nativas)
+Svelte 5 abandona el compilador basado en asignaciones mágicas en favor de **Runes explícitas** que operan tanto dentro de componentes `.svelte` como en archivos TypeScript `.svelte.ts`.
+
+---
+
+## 2. Primitivas Fundamentales de Reactividad
+
+### A. `$state` & `$state.raw` (Estado Reactivo Fino vs Masivo)
+```ts
+// Reactividad profunda con Proxies automáticos
+let user = $state({ name: 'Carlos', role: 'ADMIN', profile: { department: 'TI' } });
+
+// Para tablas o listas gigantes (>10,000 filas) usar $state.raw para evitar overhead de Proxies
+let logsHistoricos = $state.raw<ApiLog[]>([]);
+
+function actualizarLogs(nuevos: ApiLog[]) {
+  logsHistoricos = nuevos; // Reemplazo por referencia rápido
+}
+```
+
+### B. `$derived` & `$derived.by` (Valores Calculados Memoizados)
+```ts
+let filterText = $state('');
+let solicitudes = $state<Solicitud[]>([]);
+
+// Expresión simple
+let solicitudesFiltradas = $derived(
+  solicitudes.filter(s => s.folio.includes(filterText) || s.nombreCapacitacion.includes(filterText))
+);
+
+// Computación compleja con bloques usando $derived.by()
+let metricasPresupuesto = $derived.by(() => {
+  let solicitado = 0;
+  let aprobado = 0;
+  for (const s of solicitudesFiltradas) {
+    solicitado += Number(s.costoEstimado || 0);
+    aprobado += Number(s.presupuestoAprobado || 0);
+  }
+  return { solicitado, aprobado, ratio: solicitado > 0 ? (aprobado / solicitado) * 100 : 0 };
+});
+```
+
+### C. `$props` & `$bindable` (Componentes y Two-Way Binding Limpio)
+```svelte
+<!-- Componente: RatingEstrellas.svelte -->
+<script lang="ts">
+  type Props = {
+    rating?: number;
+    max?: number;
+    readonly?: boolean;
+    onChange?: (val: number) => void;
+  };
+
+  let { rating = $bindable(5), max = 5, readonly = false, onChange }: Props = $props();
+</script>
+
+<div class="stars-row">
+  {#each Array(max) as _, i}
+    <button 
+      type="button" 
+      disabled={readonly}
+      class={i < rating ? 'star-active' : 'star-muted'}
+      onclick={() => {
+        rating = i + 1;
+        onChange?.(rating);
+      }}
+    >
+      ★
+    </button>
+  {/each}
+</div>
+```
+
+### D. `$effect` & `$effect.pre` (Efectos Colaterales Seguros)
+- `$effect`: Se ejecuta **después** del montaje y actualización del DOM en el cliente (NUNCA en SSR).
+- `$effect.pre`: Se ejecuta **antes** de que el DOM sea actualizado (útil para guardar posiciones de scroll).
+- Limpieza automática retornando una función:
+```ts
+$effect(() => {
+  const handler = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') cerrarModal();
+  };
+  window.addEventListener('keydown', handler);
+  return () => window.removeEventListener('keydown', handler);
+});
+```
+
+---
+
+## 3. Snippets (`{#snippet}` y `{@render}`) — Composición sin Slots
+```svelte
+<!-- Definición de Snippet reutilizable dentro del mismo componente -->
+{#snippet badgeEstado(estado: string)}
+  <span class={`pill pill-${estado.toLowerCase()}`}>
+    {estado}
+  </span>
+{/snippet}
+
+<!-- Uso del snippet en la tabla -->
+<table>
+  {#each solicitudes as s}
+    <tr>
+      <td>{s.folio}</td>
+      <td>{@render badgeEstado(s.estado)}</td>
+    </tr>
+  {/each}
+</table>
+```
+
+---
+
+## 4. Estado Global Fuera de Componentes (`.svelte.ts`)
+```ts
+// src/lib/stores/auth.svelte.ts
+export class AuthStore {
+  user = $state<User | null>(null);
+  token = $state<string | null>(null);
+  isAuthenticated = $derived(!!this.user);
+
+  login(userData: User, tokenStr: string) {
+    this.user = userData;
+    this.token = tokenStr;
+    localStorage.setItem('auth_session', JSON.stringify({ userData, tokenStr }));
+  }
+
+  logout() {
+    this.user = null;
+    this.token = null;
+    localStorage.removeItem('auth_session');
+  }
+}
+
+export const authState = new AuthStore();
+```

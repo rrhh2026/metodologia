@@ -1,0 +1,82 @@
+---
+tarea: metodologia-02_verificacion_tres_capas
+proyecto: metodologia
+topic_key: system/metodologia
+version: 2.1.0
+origen: /opt/apps/metodologia/02_VERIFICACION_TRES_CAPAS.md
+titulo: "VERIFICACIÓN DE 3 CAPAS — click → estado → BD"
+formato: yaml-frontmatter+markdown
+estado: migrado
+---
+## Contenido migrado de /opt/apps/metodologia/02_VERIFICACION_TRES_CAPAS.md
+
+# VERIFICACIÓN DE 3 CAPAS — click → estado → BD
+
+La técnica que usamos para probar flujos transaccionales (ventas, compras,
+cierres de caja, devoluciones, etc.) en apps con backend + base de datos.
+Ninguna capa sustituye a las otras: las tres juntas prueban que el botón
+"de verdad" funciona.
+
+## Las 3 capas
+
+| Capa | Pregunta | Cómo se verifica |
+|------|----------|------------------|
+| 1. Click | ¿El botón existe y es clicable? | `getByRole(...).click()` (auto-waits de Playwright) |
+| 2. Estado | ¿Produce el estado esperado en la UI? | `toBeVisible`, `waitForURL`, `waitForResponse`, modal/toast |
+| 3. BD | ¿Persistió el cambio de verdad? | Query a BD/API comparando ANTES vs DESPUÉS |
+
+## Regla de oro
+
+Un test que "pasa" pero no cambió datos NO prueba nada. La capa 3 es la que
+evita los falsos positivos: si el flujo es transaccional, siempre se verifica
+el efecto persistido en la BD (stock que baja, registro que se crea, saldo que
+cambia).
+
+## Patrón del test transaccional
+
+```ts
+// setup: leer estado ANTES en BD
+const stockAntes = Number(sql(`SELECT current_stock FROM products WHERE id='...'`));
+const ventasAntes = Number(sql(`SELECT count(*) FROM sales WHERE store_id='...'`));
+
+// Capa 1 + 2: ejecutar el flujo en la UI
+// (login, abrir turno, escanear, agregar, cobrar)
+// medir tiempos con Date.now()
+
+// Capa 3: verificar DESPUÉS en BD
+const stockDespues = Number(sql(`SELECT current_stock FROM products WHERE id='...'`));
+const ventasDespues = Number(sql(`SELECT count(*) FROM sales WHERE store_id='...'`));
+expect(stockDespues).toBe(stockAntes - 1);   // el stock bajó 1
+expect(ventasDespues).toBe(ventasAntes + 1); // se creó la venta
+```
+
+## Depuración cuando el flujo "no persiste"
+
+Cuando la capa 3 falla (el dato no cambió) pero la UI "parece" completar el
+flujo:
+
+1. **No confiar en la UI**: el modal pudo cerrarse aunque el POST falló (el
+   `catch` del frontend muestra toast pero no re-lanza, así el modal se cierra
+   igual).
+2. **Capturar la request/response real** (ver `01_TESTING_UI_PLAYWRIGHT.yaml`):
+   el payload exacto que envía el frontend y el error real del backend.
+3. **Probar el endpoint directo** con el token del rol (curl) con el payload
+   correcto: si funciona por API, el bug está en el contrato frontend (envía
+   datos inválidos), no en el backend.
+4. **Probar la BD**: confirmar que los datos reales existen (ej. el producto
+   tiene precio en BD pero el API no lo devuelve por filtro de rol).
+
+## Casos reales vistos (Pino2)
+
+- El cajero del supermercado no podía cobrar porque el catálogo le llegaba SIN
+  precios (el controller ocultaba `price1/salePrice` para rol `auxiliar`) →
+  el carrito calculaba total C$0.00 → el backend rechazaba "monto recibido
+  menor que el total". La BD SÍ tenía precio (C$25); el bug era el filtro de
+  roles del endpoint `/products`.
+- El frontend enviaba `clientId='temp-mostrador'` (placeholder no UUID) →
+  el DTO `@IsUUID()` devolvía 400 → venta no creada. El modal se cerraba con
+  toast de error pero el flujo no persistía.
+
+**Lección**: cuando un flujo transaccional "no persiste", casi siempre es un
+contrato frontend→backend roto (payload inválido, campo oculto por rol), no la
+lógica del backend. La verificación de 3 capas + captura de red lo destapa.

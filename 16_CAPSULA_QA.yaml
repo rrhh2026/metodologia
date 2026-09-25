@@ -1,0 +1,115 @@
+---
+tarea: metodologia-16_capsula_qa
+proyecto: metodologia
+topic_key: system/metodologia
+version: 2.2.0
+titulo: "16 — CAPSULA — Capsula de contexto QA: tiempo+espacio para que el investigador aterrice sin reconstruir"
+formato: yaml-frontmatter+markdown
+estado: nuevo
+---
+## Contenido
+
+# 16 — CAPSULA — Cápsula de contexto QA
+
+**Principio: el investigador no reconstruye, aterriza.** Cuando QA reporta "acá falla / quitá esto / mové esto", el reporte debe traer congelados el tiempo y el espacio donde pasó, más los datos que había en pantalla. Ni QA adivina al reportar, ni la IA se mata rearmando al investigar. Evoluciona `05` (observabilidad backend) al frontend y la rama "fix de bug reportado" del router (`05 → 16 → sector`).
+
+## La cápsula (5 coordenadas, ni una más)
+
+| # | Coordenada | Qué congela | Ejemplo |
+|---|-----------|-------------|---------|
+| 1 | QUIÉN | email/rol/tienda que reportó | `qa@tienda.com / gestor / tienda-central` |
+| 2 | CUÁNDO | hora cliente + `createdAt` servidor + versión app (commit) | `2026-09-24T10:31:00 / abc1234` |
+| 3 | DÓNDE | ruta + selector del componente + HTML/texto visible | `/store-admin/products :: table.product-row:nth-child(3)` |
+| 4 | CON QUÉ DATOS | últimas N consultas API (método+URL+params+status) | `GET /api/products?storeId=X → 200 (42 items)` |
+| 5 | QUÉ PIDE + ESTADO | tipo (error/quitar/agregar/mover) + mensaje + estado atención | `mover / "la columna stock va primera" / pendiente` |
+
+**Estados de atención (visibilidad del dueño):** `pendiente → en_proceso → atendido` o `no_atendido+motivo`. Sin motivo escrito, el "no atendido" no existe.
+
+## Ejemplo claro: cómo cualquier página debe hacerlo
+
+Situación: QA está en `/store-admin/products`, ve que la columna stock sale última y quiere pedir "moverla primera".
+
+1. QA clickea el botón flotante **"Reportar lo que veo"** → elige **Componente exacto** → clickea la tabla → escribe *"mover columna stock primera"* → Enviar.
+2. El reporte cae a `POST /api/errors` con esta cápsula (esto es lo que viaja, siempre igual en cualquier página):
+
+```json
+{
+  "message": "mover columna stock primera",
+  "location": "/store-admin/products :: table.product-grid:nth-child(1)",
+  "additionalInfo": {
+    "kind": "componente",
+    "tipo": "mover",
+    "route": "/store-admin/products",
+    "selector": "table.product-grid:nth-child(1)",
+    "componentText": "Azúcar 2+5 ...",
+    "role": "gestor",
+    "email": "qa@tienda.com",
+    "viewport": "1366x768",
+    "clientTime": "2026-09-24T10:31:00",
+    "apiLog": [
+      { "method": "GET", "url": "/api/products?storeId=X", "status": 200, "ms": 43 },
+      { "method": "GET", "url": "/api/departments?storeId=X", "status": 200, "ms": 21 }
+    ]
+  }
+}
+```
+
+3. El investigador (humano o IA) atiende SIN rearmar nada:
+   - Filtra por fecha: `GET /api/errors?limit=5` → agarra el último.
+   - Lee DÓNDE (`route` + `selector`) → abre `web/src/routes/store-admin/products/+page.svelte`, ubica la tabla por el texto del `componentText`.
+   - Lee CON QUÉ DATOS → rejecuta `GET /api/products?storeId=X` con curl y tiene los mismos 42 items que veía QA.
+   - Hace el cambio hormiguita (mover columna), verifica (`check` + SSR 200), marca `atendido`.
+   - Si no se atiende: escribe el motivo (`no_atendido: "duplicado del #42"`). El dueño lo ve, no lo adivina.
+
+## Patrón mínimo (cualquier página, copiar/pegar)
+
+```ts
+// 1. Anillo de últimas 20 consultas en el cliente api (una vez, global):
+const apiLog: Array<{ method: string; url: string; status: number; ms: number }> = [];
+// envolver cada fetch: push({method, url, status, ms}), si length>20 shift().
+
+// 2. Botón flotante (una vez, en el layout): ruta + rol + selector clickeado
+//    + componentText/Html + viewport + clientTime + apiLog → POST /api/errors.
+//    Ver implementación real: pino3 `web/src/lib/components/ReportBug.svelte`.
+```
+
+## Reglas
+
+- **Sin backend nuevo:** la cápsula viaja en `additionalInfo` (JSON libre) del endpoint de errores existente.
+- **Lo que NO se captura:** screenshots en BD (bloat), estado interno total del framework (frágil), passwords/tokens (sanitizar como en `05`).
+- **Retención:** vale la del módulo de errores (`DELETE >24h` o la que defina el proyecto) — la cápsula no crea tabla nueva.
+- **Versión obligatoria:** sin commit/hora no hay cápsula válida; un reporte de ayer contra código de hoy se marca `no_atendido: "código cambió desde el reporte"`.
+- **Verificación de cada atención:** reproducir con los params de la cápsula → fix → 3 capas del flujo (`02`) → marcar estado con evidencia.
+
+## Patrones adoptados de la industria (investigado 2026-09-24)
+
+No inventar lo probado. Tomamos 3 patrones, no sus infraestructuras:
+
+1. **De Jam, `metadata()` al capturar** — cada página registra un callback que se ejecuta en el momento del reporte y devuelve estado vivo (filtros activos, IDs en pantalla, flags), serializable y chico (<10KB). Es la coordenada CON QUÉ DATOS del lado app.
+2. **De rrweb, sanitizar en el borde** — como su `transformRequestFn`: `Authorization`/passwords/tokens se sacan ANTES de guardar la cápsula, nunca después. Jamás viajan a la BD.
+3. **De OpenReplay, correlación front+back** — la cápsula se lee junto a `api_request_logs` (`05`) por fecha+usuario: el replay de red del cliente más el log del servidor cuentan la historia completa sin infra nueva.
+
+Lo que NO tomamos (peso innecesario hoy): tracker siempre-encendido, video/instant replay, SaaS externo. Si la foto+logs no alcanzan algún día, el replay con rrweb queda como evolución documentada, no como deuda.
+
+## Fusión 04+05+16 (reportado y no reportado, mismo camino)
+
+`04` (auditoría logs + consultas lentas) y `05` (api_request_logs) cubren lo NO reportado del lado servidor; `16` cubre lo reportado del lado cliente. Nada los unía: esta sección los fusiona en un solo camino.
+
+1. **Toda cápsula se lee junto al servidor.** Al atender un reporte, además de la cápsula, traer de `api_request_logs` por fecha+usuario+ruta (`method/url/status/duration/user`) y de `consultasql_historial` si hubo lentitud. El cliente dice QUÉ vio, el servidor dice QUÉ pasó.
+2. **Todo 500/lenta sin cápsula es un "reporte huérfano".** Se atiende con el mismo flujo (aterrizar → fix → 3 capas → estado), solo que el investigador crea la cápsula mínima (ruta+params del log) al tomarla. Lo no reportado también tiene estado de atención.
+3. **Regla de lectura cruzada:** si la cápsula dice 200 pero el usuario vio error → mirar `api_request_logs` (el fallo está en otra llamada); si el log dice 500 pero nadie reportó → reporte huérfano con motivo `detectado-en-log`.
+
+## Aplicación estándar (botón, código y nombre) — lección pino3 2026-09-24
+
+1. **Botón flotante mínimo:** círculo abajo-derecha con solo icono (bandera ⚑) + tooltip "Enviar cápsula". Nada de texto: el QA ya sabe qué es. Abre panel: mensaje + modo página/componente-exacto (clic sobre el componente captura selector+HTML+texto) + Enviar.
+2. **Código corto al enviar:** la respuesta muestra `Cápsula XXXXXXXX` (8 del id) + botón copiar que deja `"revisa capsula XXXXXXXX"` listo para pegar en el chat con la IA. Sin código, el reporte queda huérfano en la BD y nadie lo pide.
+3. **Nombre reservado:** todo esto se llama CÁPSULA, jamás "reporte" (reporte = contable). Menú, página, estados y conversación usan Cápsula.
+4. **Reglas del botón:** solo `additionalInfo` JSON libre del endpoint de errores existente (sin backend nuevo); sanitizar en el borde (sin tokens/passwords); no capturar ruido 401 de sesión vencidamanejo de 401 real: limpiar sesión e ir a login, nunca dejar la página clavada.
+5. **Claves de sesión namespacedas por app** (`pino3_*`): en un mismo origen con varias apps, las claves genéricas se pisan y todo da 401, incluido el envío de la cápsula ("reportar da error").
+
+## Integra con
+
+- `05_API_REST_LOG.yaml` — el espejo servidor de la coordenada 4 (qué pasó sin reproducir).
+- `02_VERIFICACION_TRES_CAPAS.yaml` — cómo se prueba lo atendido.
+- `00_ROUTER.yaml` rama "fix de bug reportado" — leer `05 → 16 → sector`.
+- `07_ENGRAM_MEMORIA.yaml` — cada atención cerrada se guarda con su `topic_key` de módulo.

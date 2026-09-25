@@ -1,0 +1,103 @@
+---
+tarea: metodologia-10_documento_yaml
+proyecto: metodologia
+topic_key: system/metodologia
+version: 2.1.0
+origen: /opt/apps/metodologia/10_DOCUMENTO_YAML.md
+titulo: "10 — DOCUMENTO GLOBAL EN YAML — Por qué es más eficiente"
+formato: yaml-frontmatter+markdown
+estado: migrado
+---
+## Contenido migrado de /opt/apps/metodologia/10_DOCUMENTO_YAML.md
+
+# 10 — DOCUMENTO GLOBAL EN YAML — Por qué es más eficiente
+
+> Regla global: **Toda documentación viva es YAML**. MD queda solo para narrativa estática (README). Lo vivo (HANDOFF, MAPA, validación) es YAML con `topic_key`.
+
+## Por qué YAML es más eficiente (no es gusto, es costo)
+
+### 1. Tokens: -60% por lectura
+- MD libre: cada agente escribe "Estado: completado / COMPLETADO / hecho / ✓" → el siguiente gasta 400-600 tokens adivinando
+- YAML: `estado: COMPLETADO` fijo → `yaml.safe_load()` valida en 5ms, 80 tokens. **Ahorro ~500 tokens por HANDOFF × 30 HANDOFFs = 15k tokens/mes** (router 00_ROUTER.yaml: Módulo nuevo 100-150k → con YAML cae a 60-100k)
+
+### 2. RAG y Engram: O(1) vs O(n)
+- MD: `engram search "cierre caja"` escanea texto libre, trae falsos positivos, 0 topic_key (pino2 tenía 0)
+- YAML: `topic_key: finance/cash-shift` indexa directo → `engram search "cash-shift" --project pino2` trae solo 693/694, sin ruido. Búsqueda 3× más rápida, 0 hallazgos perdidos
+
+### 3. Delegación sin saturar al principal (Regla 21/25)
+- MD: principal debe leer 2k líneas de relato para entender qué falta → acumula 150k tokens y se corrompe (edits que no apuntan)
+- YAML: `coordinador: P1 topic_key: inventory/kardex (25k) → P2 auth/roles (25k)` → principal lee solo frontmatter 12 líneas, delega 4 sesiones frescas de 25-50k. **Principal queda <10k**, otra IA gasta 100k
+
+### 4. Validación automática (fail-fast)
+```bash
+python3 -c "import yaml; yaml.safe_load(open('HANDOFF_*.yaml'))" # falla en 10ms si falta topic_key
+# MD no falla nunca — el error se descubre 3 días después en producción con diff !=0
+```
+
+### 5. Evaporación y TTL (Regla 37)
+- YAML: `estado: COMPLETADO + evaporado: null + review_after: 7d` → `evaporar.sh --check` marca solo YAMLs con mtime viejo
+- MD: sin campos → script no sabe qué evaporar, quedan 4 inventory_counts OPEN eternos
+
+## Qué es YAML vivo (contrato)
+```yaml
+---
+tarea: cierre-caja-supermercado
+proyecto: pino2
+topic_key: finance/cash-shift  # OBLIGATORIO: dominio/modulo del catálogo 07:51
+rentabilidad: alta             # alta >500ms/bug crítico, media 100-500ms, baja <100ms
+valor: "diff 0 en 4.9s, stock 33→32"  # medible, no "mejoró"
+coordinador: [P1, P2, P3]      # cada P con su topic_key y tokens estimados
+estado: pendiente | en_progreso | COMPLETADO
+evaporado: null
+---
+## Avance / Errores / Verificado / Donde quedo  # cuerpo markdown libre, pero frontmatter manda
+```
+
+## Qué se arranca (migración)
+- `HANDOFF_*.yaml` ya migrados (sales/process, finance/cash-shift, system/evaluacion)
+- `docs/MAPA_VIVO_PINO2.yaml` reemplaza `.md` (próximo paso)
+- `2026-08-20_Validacion_Flujos_Bodeguero/*.yaml` reemplaza `.txt`
+- MD viejos se archivan en `docs/archive/md_2026-08-27/` — no se borran, no se usan
+
+## Prueba real 2026-08-27 — YAML vs TOON vs MD vs JSON (200 productos de pino2, 7183 totales)
+
+> Archivo grande tabular homogéneo: `SELECT id,description,price1,current_stock,barcode FROM products LIMIT 200` — mismo dato en 4 formatos, tokenizado `o200k_base` (proxy GPT-5)
+
+| Formato | Bytes | Tokens | vs JSON pretty | vs YAML | Uso |
+|---|---|---|---|---|---|
+| JSON pretty | 35.874 | 8.968 | baseline | +27% | Solo debug humano |
+| JSON min | 28.673 | 7.167 | -20% | +2% | **Output parsable** `JSON.parse()` |
+| YAML | 28.126 | 7.031 | -22% | baseline | **HANDOFF nested** (precisión) |
+| MD strict table | 18.484 | 4.620 | -48% | -34% | **Fallback universal** (todo modelo lo conoce) |
+| **TOON** `fields: id,description,...` | **16.351** | **4.087** | **-54%** | **-42%** | **Bulk tabular** (header 1 vez) |
+
+- TOON declara `fields:` una sola vez; YAML repite `topic_key:` 200 veces → 12k tokens ahorrados en 200 filas, ~175k en 7183
+- Lossless verificado: `TOON → JSON` 200/200 idéntico
+- Nested (HANDOFF con `coordinador/P1..P4` anidados): YAML 303 bytes 75 tokens vs TOON 307 bytes 76 tokens → **empate** → YAML sigue mandando por precisión
+
+### Regla de formato por dirección (input vs output)
+- **Input a IA:** YAML (nested) o TOON/MD (tablas) — nunca JSON pretty
+- **Output de IA que tu código parsea:** JSON min (`separators: (',',':')`)
+- **Output humano:** MD strict (-65% vs JSON en Opus, `webmaster-ramos` 450 calls)
+
+### Herramientas y few-shot TOON (porque no todo agente lo conoce)
+- CLI: `toon` (`toonformat.dev/cli`), Python `pip install json2toon` (`from json2toon import json_to_toon`), NPM `@programsmagic/toon-*`, MCP `chaindead/tooner`, VSCode `vishalraut.vscode-toon`
+- Sonnet/Haiku necesitan few-shot, Opus 4.6 no (`webmaster-ramos`): pegá esto al system:
+  ```
+  Formato TOON: fields: a,b,c \n val1,val2,val3
+  Ejemplo:
+  fields: topic_key,desc
+  sales/process,Venta rápida 24.5s
+  ```
+- Si no controlás al agente, usa MD strict (-53% vs JSON, 100% modelos lo conocen)
+
+### Checklist agente (antes de elegir formato)
+```
+¿Es nested con jerarquía? → YAML
+¿Es lista homogénea 50+ filas? → TOON (con header) o MD table si dudás del agente
+¿Lo va a parsear Node/Python? → JSON min al final, tras razonar en libre
+```
+
+## Regla de oro eficiencia
+> Si no está en YAML con `topic_key`, no existe para Engram y no lo puede tomar otra IA. Si está en MD, lo lee un humano pero lo ignora la colonia.
+> Métrica: con 200 filas TOON ahorra 4.8k tokens vs YAML; a escala pino2 (30 HANDOFFs + catálogos) = 15k tokens/mes solo en HANDOFFs + 175k en catálogos

@@ -1,0 +1,80 @@
+---
+tarea: guia-postgresql-optimizacion
+proyecto: metodologia
+topic_key: system/lenguaje/postgresql
+version: 1.0.0
+titulo: "POSTGRESQL 14+ — Estrategias de Indexación, Tuning de Rendimiento y Análisis de Consultas"
+formato: yaml
+estado: activo
+---
+# POSTGRESQL 14+ — GUÍA DE RENDIMIENTO E INDEXACIÓN AVANZADA
+
+## 1. Tipos de Índices y Cuándo Usar Cada Uno
+
+| Tipo de Índice | Cuándo Usarlo | Ejemplo Real DNC |
+|---|---|---|
+| **B-Tree (Default)** | Operadores `=`, `<`, `<=`, `>`, `>=`, `BETWEEN`, `IN` | `idx_solicitudes_folio` en `folio` |
+| **B-Tree Compuesto** | Consultas con múltiples filtros frecuentes `WHERE a = ? AND b = ?` | `idx_solicitudes_gerencia_periodo` en `(gerencia, periodo_fiscal)` |
+| **GIN (Generalized Inverted)** | Columnas `JSONB`, Arrays `text[]`, Full-Text Search | `idx_request_logs_body_gin` con `USING GIN (request_body)` |
+| **Parcial (`WHERE`)** | Indexar solo un subconjunto relevante (reduce 80% tamaño) | `CREATE INDEX idx_pendientes ON dnc_solicitudes(id) WHERE estado = 'PENDIENTE'` |
+| **Expresión / Funcional** | Búsquedas insensibles a mayúsculas o funciones | `CREATE INDEX idx_emp_nombre ON dnc_empleados(LOWER(nombre_completo))` |
+
+---
+
+## 2. DDL de Índices Esenciales para Sistemas Transaccionales
+```sql
+-- Índice compuesto para el listado principal filtrado
+CREATE INDEX IF NOT EXISTS idx_dnc_solicitudes_filtro 
+ON dnc_solicitudes(periodo_fiscal, estado, gerencia);
+
+-- Índice GIN para búsquedas sobre el payload JSONB de observabilidad
+CREATE INDEX IF NOT EXISTS idx_api_request_logs_jsonb_gin 
+ON api_request_logs USING GIN (request_body jsonb_path_ops);
+
+-- Índice parcial para agilizar la cola de firmas de aprobadores
+CREATE INDEX IF NOT EXISTS idx_dnc_aprobaciones_cola 
+ON dnc_aprobaciones(carnet_aprobador) 
+WHERE estado = 'PENDIENTE';
+```
+
+---
+
+## 3. Diagnóstico con `EXPLAIN (ANALYZE, BUFFERS)`
+Al ejecutar `EXPLAIN (ANALYZE, BUFFERS)` sobre una consulta:
+
+### Métricas Clave a Monitorear:
+1. **`actual time=0.012..0.350`:** Tiempo real en milisegundos.
+2. **`Buffers: shared hit=4`:** Datos leídos desde la memoria RAM (caché de PostgreSQL).
+3. **`Buffers: read=20`:** Datos leídos desde el disco físico (cuello de botella).
+4. **`Seq Scan` vs `Index Scan`:**
+   - `Seq Scan`: Escanea toda la tabla fila por fila. Peligroso en tablas > 10,000 filas.
+   - `Index Scan` / `Bitmap Index Scan`: Acceso directo por árbol B-Tree en sub-milisegundos.
+
+---
+
+## 4. Estrategia de Concurrencia y Bloqueos (`FOR UPDATE SKIP LOCKED`)
+Para procesamiento seguro de colas (ej: procesamiento de notificaciones o firmas simultáneas):
+```sql
+-- Selecciona el siguiente turno de firma sin bloquear a otros hilos
+SELECT id, solicitud_id, carnet_aprobador
+FROM dnc_aprobaciones
+WHERE estado = 'PENDIENTE'
+ORDER BY id ASC
+LIMIT 1
+FOR UPDATE SKIP LOCKED;
+```
+
+---
+
+## 5. Mantenimiento y Purga de Históricos (Vacuum & Retention)
+- **Autovacuum Tuning:** En tablas de alta inserción (`api_request_logs`), ajustar `autovacuum_vacuum_scale_factor = 0.05` para evitar acumulación de *bloat*.
+- **Purga por Lotes (Evitar Locks Largos):**
+```sql
+-- Eliminar en lotes de 5,000 filas para no bloquear escrituras concurrentes
+DELETE FROM api_request_logs
+WHERE id IN (
+  SELECT id FROM api_request_logs 
+  WHERE created_at < NOW() - INTERVAL '7 days' 
+  LIMIT 5000
+);
+```

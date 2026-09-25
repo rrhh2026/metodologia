@@ -1,0 +1,367 @@
+---
+tarea: metodologia-01_testing_ui_playwright
+proyecto: metodologia
+topic_key: system/metodologia
+version: 2.0.0
+origen: /opt/apps/metodologia/01_TESTING_UI_PLAYWRIGHT.md
+titulo: "TESTING DE UI CON PLAYWRIGHT (headless) — metodología general"
+formato: yaml-frontmatter+markdown
+estado: migrado
+---
+## Contenido migrado de /opt/apps/metodologia/01_TESTING_UI_PLAYWRIGHT.md
+
+# TESTING DE UI CON PLAYWRIGHT (headless) — metodología general
+
+Cómo probamos una app web real (React/Vue/SPA) actuando como un usuario real,
+sin gastar tokens y verificando de verdad que el flujo persiste.
+
+## Cuándo usar Playwright vs curl
+
+- **Solo verificar que "responde"** (HTTP 200) → `curl` con Host header.
+  NO Playwright.
+- **Probar un flujo/click/login/pantalla/botón** → Playwright headless.
+
+## Reglas duras
+
+1. **NAT del VPS**: el VPS no llega a su propia IP pública. Agregar el dominio
+   a `/etc/hosts` → `127.0.0.1 <dominio>` (solo si no está).
+2. **`waitUntil: 'domcontentloaded'`**, NUNCA `networkidle` (las SPAs con
+   polling/websockets nunca llegan a quiet).
+3. **Esperar ESTADO, no tiempo**: web-first assertions
+   (`await expect(locator).toBeVisible()`, `waitForURL`, `waitForResponse`).
+   - Excepción legítima: en SPAs con carga asíncrona (React Query, toasts),
+     un `waitForTimeout` acotado (1500-4000ms) es aceptable cuando no hay
+     estado observable que esperar. Nunca waits largos para tapar un selector.
+4. **Locators semánticos**: `getByRole('button', { name: 'X' })` primero;
+   luego `getByLabel`/`getByPlaceholder`/`getByText`; `getByTestId` como
+   escape; CSS/XPath última opción. Si un botón no se encuentra por role =
+   bug de accesibilidad real.
+5. **Un directorio por proyecto**: `PLAYWRIGHT_DIR` (default
+   `/tmp/opencode/pwtest-<proyecto>`). No compartir node_modules entre
+   proyectos.
+6. **Credenciales por env, NUNCA hardcodeadas** (PLAYWRIGHT_USER, etc.).
+7. **Screenshots a `/tmp/opencode/`**. No tocar iptables/firewall.
+
+## NÚCLEO: verificación de 3 capas (lo que más valor da)
+
+Un botón "sirve" si hace lo que debe, no si se ve bonito. Verificar SIEMPRE
+las 3 capas:
+
+### Capa 1 — El botón existe y es clicable
+```ts
+await page.getByRole('button', { name: 'Guardar' }).click();
+```
+Playwright auto-waits: attached → visible → estable → enabled → no cubierto.
+
+### Capa 2 — Produce el estado esperado (¿hace lo que debe?)
+- Cambia la URL → `await page.waitForURL('**/ruta')`
+- Aparece confirmación/modal → `await expect(page.getByText('Guardado')).toBeVisible()`
+- Desaparece el spinner → `await expect(page.locator('.spinner')).toBeHidden()`
+- Hace una llamada de red → `await page.waitForResponse('**/api/guardar')`
+
+### Capa 3 — Persistió de verdad (evitar falso positivo) ← CLAVE
+Un test que "pasa" pero no cambió datos NO prueba nada. Si el botón
+crea/guarda/edita, verificar el efecto persistido (BD/API):
+- El ítem aparece en la lista → `await expect(page.getByText('Nuevo')).toBeVisible()`
+- El stock bajó 1 / se creó la venta / se insertó el registro → consultar BD/API
+  y comparar ANTES/DESPUÉS.
+
+### Caso inválido (validaciones)
+Todo botón de guardar debe probarse también con campos vacíos/mal formados:
+debe mostrar mensaje de error y NO guardar.
+
+## Flujo transaccional completo
+
+1. **Health-check primero**: `curl -sk http://127.0.0.1:<puerto>/api/health` —
+   502/500 del backend = entorno roto, NO bug de UI (no reportar falso fallo).
+2. **Caso válido**: completar el flujo y verificar UI + efecto persistido (BD/API).
+3. **Caso inválido**: campo vacío → debe validar y no guardar.
+4. **Si la UI no completa el flujo** (modal no avanza, botón oculto):
+   - Investigar el DOM real (a veces el "botón" es un `<div>` clicable).
+   - Ver si está `lg:hidden`, `display:none`, o detrás de un overlay.
+   - Probar el **endpoint que esa pantalla usa** (curl/POST) para ver si el
+     BACKEND funciona.
+   - **Clasificar**: ¿bug de UI, bug de backend, o falso positivo del test?
+
+## Depuración de selectores que no aparecen
+
+1. Inspeccionar los selectores REALES (navegar + listar input/button con
+   id/type/placeholder/name).
+2. Si no aparece por role, listar el DOM del contenedor (dialog, card, tabla).
+3. Ver `boundingBox` y `getComputedStyle` (display/visibility/opacity) —
+   puede estar oculto (móvil-only) o tapado por un overlay.
+4. **Falso positivo del test**: si el test falla por expectativa incorrecta
+   (regex que no matchea el mensaje real), corregir el TEST, no el código.
+
+## Diagnóstico de errores de red en el flujo
+
+Cuando un flujo "no persiste" pero el backend responde bien por API, capturar
+la request/response REAL del navegador:
+
+```ts
+page.on('request', (req) => { if (req.url().includes('/sales/process')) console.log('REQ', req.postData()); });
+page.on('response', async (resp) => { if (resp.url().includes('/sales/process')) { console.log('RESP', resp.status(), (await resp.text()).slice(0,1000)); } });
+```
+
+Esto revela el payload exacto que el frontend envía (a veces envía `amount: 0`,
+un `clientId` inválido, etc.) y el error real del backend. La causa suele estar
+en el contrato frontend→backend, no en la lógica.
+
+## Estructura (Page Object Model)
+
+```
+<playwright_dir>/
+├── playwright.config.ts        # workers, trace, video, reporter
+└── e2e/
+    ├── pages/                  # Page Objects (uno por pantalla/módulo)
+    │   ├── base-page.ts        # navegación, screenshots, detectar error/bloqueo
+    │   └── <modulo>-page.ts
+    ├── fixtures/               # usuarios/tiendas/ids + helper sql() para BD
+    ├── flows/                  # los tests (un flujo de negocio por spec)
+    └── utils/                  # helpers
+```
+
+- **POM**: si cambia un botón, se corrige UN archivo, no cada test.
+- **Helper BD** (`e2e/fixtures/db.ts`): expone `sql()`/`sqlOne()` para la
+  verificación Capa 3 contra PostgreSQL real.
+
+## Ejecución
+
+```bash
+npx playwright test e2e/flows/<flujo>.spec.ts --reporter=line --workers=1 --retries=0
+```
+
+- **1 worker + `--retries=0`** cuando se verifican flujos transaccionales con
+  efecto en BD (evita dobles corridas / estados de carrera sobre los datos).
+- Medir tiempos con `Date.now()` alrededor de los pasos críticos (login,
+  cobro, navegación) y loguear con `console.log`.
+
+## Recorrido amplio de pantallas (regresión)
+
+Navegar TODAS las rutas por grupos de 10-30 y detectar: error boundary
+("UPS! ALGO SALIÓ MAL"), errores de consola (`page.on('console')`) y
+`page.on('pageerror')`. Un solo test con ~80 navegaciones puede crashear
+Chromium (SEGV).
+
+## Output esperado de una prueba
+
+(a) spec creado (ruta), (b) resultado pass/fail con evidencia, (c) screenshot,
+(d) selectores reales, (e) qué verifica cada assertion (botón actionable +
+estado resultante + efecto persistido), (f) si falló: causa raíz y
+clasificación (bug UI / bug backend / falso positivo del test).
+
+## Notificación por email — resumen de pruebas al terminar
+
+Al finalizar cada suite de pruebas, se envía automáticamente un email con
+resumen detallado a `gustavo.lira@claro.com.ni`. El email incluye: resultado
+por punto, errores encontrados, correcciones aplicadas, tiempos y evidencia.
+
+### Configuración del helper de email
+
+Crear `e2e/utils/email-reporter.ts`:
+
+```ts
+import nodemailer from 'nodemailer';
+
+interface TestResult {
+  nombre: string;
+  estado: 'PASS' | 'FAIL' | 'SKIP';
+  duracionMs: number;
+  capa1: string;  // resultado de click/interacción
+  capa2: string;  // resultado de estado UI
+  capa3: string;  // resultado de persistencia BD
+  error?: string;
+  correccion?: string;
+  screenshot?: string;
+}
+
+interface ResumenPruebas {
+  proyecto: string;
+  suite: string;
+  fecha: string;
+  duracionTotal: string;
+  resultados: TestResult[];
+}
+
+export async function enviarResumenPruebas(resumen: ResumenPruebas) {
+  const pass = resumen.resultados.filter(r => r.estado === 'PASS').length;
+  const fail = resumen.resultados.filter(r => r.estado === 'FAIL').length;
+  const skip = resumen.resultados.filter(r => r.estado === 'SKIP').length;
+  const total = resumen.resultados.length;
+
+  const transporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST || 'smtp.claro.com.ni',
+    port: Number(process.env.SMTP_PORT) || 587,
+    secure: false,
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    },
+  });
+
+  const tablaResultados = resumen.resultados.map(r => {
+    const icono = r.estado === 'PASS' ? '✅' : r.estado === 'FAIL' ? '❌' : '⏭️';
+    const errorHtml = r.error
+      ? `<br><b style="color:#da291c">Error:</b> ${escapeHtml(r.error)}`
+      : '';
+    const correccionHtml = r.correccion
+      ? `<br><b style="color:#2e7d32">Corrección aplicada:</b> ${escapeHtml(r.correccion)}`
+      : '';
+    return `<tr>
+      <td style="padding:8px;border:1px solid #ddd">${icono} ${escapeHtml(r.nombre)}</td>
+      <td style="padding:8px;border:1px solid #ddd;text-align:center"><b>${r.estado}</b></td>
+      <td style="padding:8px;border:1px solid #ddd;text-align:right">${r.duracionMs}ms</td>
+      <td style="padding:8px;border:1px solid #ddd;font-size:12px">
+        <b>Capa 1:</b> ${escapeHtml(r.capa1)}<br>
+        <b>Capa 2:</b> ${escapeHtml(r.capa2)}<br>
+        <b>Capa 3:</b> ${escapeHtml(r.capa3)}
+        ${errorHtml}${correccionHtml}
+      </td>
+    </tr>`;
+  }).join('\n');
+
+  const html = `
+  <div style="font-family:'Segoe UI',Arial,sans-serif;max-width:800px;margin:0 auto">
+    <div style="background:#1a1a2e;color:#fff;padding:16px 24px;border-radius:8px 8px 0 0">
+      <h2 style="margin:0">🧪 Resumen de Pruebas — ${escapeHtml(resumen.proyecto)}</h2>
+      <p style="margin:4px 0 0;opacity:0.8">${escapeHtml(resumen.suite)} • ${resumen.fecha}</p>
+    </div>
+
+    <div style="padding:20px 24px;background:#f8f9fa;border:1px solid #ddd">
+      <table style="width:100%;border-collapse:collapse;margin-bottom:16px">
+        <tr>
+          <td style="padding:12px;text-align:center;background:#e8f5e9;border-radius:4px">
+            <div style="font-size:28px;font-weight:bold;color:#2e7d32">${pass}</div>
+            <div style="font-size:12px;color:#666">PASS</div>
+          </td>
+          <td style="padding:12px;text-align:center;background:${fail > 0 ? '#ffebee' : '#f5f5f5'};border-radius:4px">
+            <div style="font-size:28px;font-weight:bold;color:${fail > 0 ? '#da291c' : '#999'}">${fail}</div>
+            <div style="font-size:12px;color:#666">FAIL</div>
+          </td>
+          <td style="padding:12px;text-align:center;background:#f5f5f5;border-radius:4px">
+            <div style="font-size:28px;font-weight:bold;color:#999">${skip}</div>
+            <div style="font-size:12px;color:#666">SKIP</div>
+          </td>
+          <td style="padding:12px;text-align:center;background:#e3f2fd;border-radius:4px">
+            <div style="font-size:28px;font-weight:bold;color:#1565c0">${resumen.duracionTotal}</div>
+            <div style="font-size:12px;color:#666">DURACIÓN</div>
+          </td>
+        </tr>
+      </table>
+
+      <h3 style="margin:16px 0 8px;color:#1a1a2e">Detalle por punto</h3>
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead>
+          <tr style="background:#1a1a2e;color:#fff">
+            <th style="padding:8px;text-align:left">Test</th>
+            <th style="padding:8px;text-align:center">Estado</th>
+            <th style="padding:8px;text-align:right">Tiempo</th>
+            <th style="padding:8px;text-align:left">Verificación 3 Capas</th>
+          </tr>
+        </thead>
+        <tbody>${tablaResultados}</tbody>
+      </table>
+    </div>
+
+    <div style="padding:12px 24px;background:#1a1a2e;color:#aaa;border-radius:0 0 8px 8px;font-size:11px">
+      Generado por Metodología Hormiguita v2.1 • ${total} tests • ${resumen.fecha}
+    </div>
+  </div>`;
+
+  await transporter.sendMail({
+    from: process.env.SMTP_FROM || '"Playwright QA" <qa@claro.com.ni>',
+    to: 'gustavo.lira@claro.com.ni',
+    subject: `${fail > 0 ? '❌' : '✅'} Pruebas ${resumen.proyecto}: ${pass}/${total} pass — ${resumen.suite}`,
+    html,
+  });
+
+  console.log(`📧 Resumen enviado a gustavo.lira@claro.com.ni (${pass}/${total} pass)`);
+}
+
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+```
+
+### Uso en los tests (al final de cada suite)
+
+```ts
+// e2e/flows/ventas.spec.ts
+import { test } from '@playwright/test';
+import { enviarResumenPruebas, type TestResult } from '../utils/email-reporter';
+
+const resultados: TestResult[] = [];
+
+test('Venta completa con cobro', async ({ page }) => {
+  const inicio = Date.now();
+  // ... capas 1, 2, 3 ...
+  resultados.push({
+    nombre: 'Venta completa con cobro',
+    estado: 'PASS', // o 'FAIL' si falla
+    duracionMs: Date.now() - inicio,
+    capa1: 'Botón "Cobrar" encontrado por getByRole, click OK',
+    capa2: 'Modal de confirmación visible, URL cambió a /ventas/recibo',
+    capa3: 'sales count +1, stock -1 verificado en BD',
+  });
+});
+
+test('Venta rechazada por monto 0', async ({ page }) => {
+  const inicio = Date.now();
+  // ... intento de venta sin productos ...
+  resultados.push({
+    nombre: 'Venta rechazada por monto 0',
+    estado: 'PASS',
+    duracionMs: Date.now() - inicio,
+    capa1: 'Botón "Cobrar" clickeado',
+    capa2: 'Toast de error visible: "Agregue al menos un producto"',
+    capa3: 'sales count sin cambio (countAntes === countDespues)',
+  });
+});
+
+test.afterAll(async () => {
+  await enviarResumenPruebas({
+    proyecto: 'pino2',
+    suite: 'ventas.spec.ts',
+    fecha: new Date().toISOString().split('T')[0],
+    duracionTotal: `${(resultados.reduce((s, r) => s + r.duracionMs, 0) / 1000).toFixed(1)}s`,
+    resultados,
+  });
+});
+```
+
+### Cuando hay error con corrección automática
+
+Si el agente detecta un error y lo corrige durante la prueba (ej. selector
+roto, placeholder inválido), registrar la corrección en el resultado:
+
+```ts
+resultados.push({
+  nombre: 'Login con credenciales válidas',
+  estado: 'PASS',
+  duracionMs: 3200,
+  capa1: 'Input usuario encontrado por getByLabel',
+  capa2: 'Redirección a /dashboard verificada',
+  capa3: 'Token JWT almacenado en cookie httpOnly',
+  error: 'Selector original getByRole("textbox", {name: "Usuario"}) no encontró el input — el input no tenía label asociado',
+  correccion: 'Se usó getByPlaceholder("Ingrese su usuario") como fallback. Bug de accesibilidad registrado en HANDOFF.',
+});
+```
+
+### Variables de entorno requeridas
+
+```bash
+# En el .env del proyecto o exportar antes de correr tests
+SMTP_HOST=smtp.claro.com.ni
+SMTP_PORT=587
+SMTP_USER=qa-automatizado@claro.com.ni
+SMTP_PASS=<contraseña>
+SMTP_FROM="Playwright QA <qa@claro.com.ni>"
+```
+
+### Regla: cuándo se envía el email
+
+- **Siempre** al terminar una suite completa (`test.afterAll`)
+- **Nunca** por test individual (evitar spam)
+- El subject del email lleva ✅ si todo pasó o ❌ si hubo fallos → filtrable
+  por Gustavo sin abrir el correo
+- Si SMTP no está configurado, solo imprime el resumen en consola (no falla)

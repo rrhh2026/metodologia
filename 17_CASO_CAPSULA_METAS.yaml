@@ -1,0 +1,50 @@
+---
+tarea: metodologia-17_caso_capsula_metas
+proyecto: metodologia
+topic_key: system/metodologia
+version: 1.0.0
+titulo: "17 — CASO CÁPSULA — Trabajando un bug con cápsula (Kevin, Metas)"
+formato: yaml-frontmatter+markdown
+estado: nuevo
+---
+## Contenido
+
+# 17 — CASO CÁPSULA — Cómo se trabaja un bug con cápsula
+
+**Principio: el reporte trae el dónde; el investigador no adivina, aterriza.**
+Caso real: `p_Capsulas.id 1` — "no me sale metas que me cascadearon"
+(kevine.barahona, `/portal/planer/app/v4/metas`, 2026-09-25).
+
+## El flujo (5 pasos, en orden)
+
+1. **Leer la cápsula entera** (no el preview): mensaje + ruta + apiLog +
+   quién/cuándo. Acá el apiLog mostraba `GET /api/v3/metas-list → 200`
+   pero vacío: la pista exacta.
+2. **Reproducir con sus params**: misma llamada, mismo usuario
+   (login + `mias=1` primero, después la llamada exacta del frontend
+   `page_size=1000` sin `mias`). Cada variante es un caso distinto.
+3. **Corregir por capas, una a la vez**: (a) filtro API `mias`,
+   (b) filtro API listado general, (c) filtro en pantalla (tab).
+   Cada capa se verifica antes de tocar la siguiente.
+4. **Verificar como el usuario**: login con su correo, su llamada exacta,
+   contar lo visible (0→5). API OK ≠ pantalla OK.
+5. **Atender con motivo**: `estado=atendido + motivo` (qué se corrigió +
+   cómo se verificó). Sin motivo escrito, el "no atendido" no existe.
+
+## Reglas destiladas del caso
+
+- **La llamada exacta, no una variante**: verificar con `mias=1` dio 5 y
+  pareció listo, pero la pantalla usaba otra variante (vacía). El bug
+  real estaba en la variante no probada.
+- **Tres capas de visibilidad**: filtro API (mias) / filtro API (general) /
+  filtro en pantalla (tab). Compartir toca las tres: quien comparte crea
+  asignación, pero ninguna capa la mostraba.
+- **Lenguaje usuario=bug, cápsula=interno**: el usuario solo ve
+  "Reportar bug / Bug N reportado"; `revisa bug N` = id directo.
+  "Cápsula" vive solo en código, bandeja, checklist y memoria.
+
+## Integra con
+
+- `16_CAPSULA_QA.yaml` — formato del reporte que hace posible este flujo.
+- `00_ROUTER.yaml` rama "fix de bug reportado" — `05 → 16 → sector`.
+- `02_VERIFICACION_TRES_CAPAS.yaml` — click + estado + BD por capa.

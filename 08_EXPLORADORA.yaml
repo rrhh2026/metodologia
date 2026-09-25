@@ -1,0 +1,117 @@
+---
+tarea: metodologia-08_exploradora
+proyecto: metodologia
+topic_key: system/metodologia
+version: 2.1.0
+origen: /opt/apps/metodologia/08_EXPLORADORA.md
+titulo: "08 — EXPLORADORA vs EXPLOTADORA — hormiga 10% (regla 38)"
+formato: yaml-frontmatter+markdown
+estado: migrado
+---
+## Contenido migrado de /opt/apps/metodologia/08_EXPLORADORA.md
+
+# 08 — EXPLORADORA vs EXPLOTADORA — hormiga 10% (regla 38)
+
+> La explotadora ejecuta el plan. La exploradora busca un plan mejor.
+> Sin exploradoras, convergés al óptimo local.
+
+## 1. Principio biológico
+
+Hormigas reales: 90% explotadoras (siguen feromona fuerte), 10% exploradoras
+(caminan aleatorio). Si solo hay explotadoras, el camino inicial —aunque malo—
+se refuerza para siempre. Las exploradoras encuentran atajos y los proponen.
+
+Traducción IA: no lances 10 sub-agentes a hacer el plan más rápido (explotar).
+Lanzá 1 cada 10 tareas a cuestionar el plan (explorar).
+
+## 2. Cuándo lanzar
+
+| Condición | Acción |
+|-----------|--------|
+| Cada 10 tareas hormiguita con `[x]` en checklist | Lanzar 1 exploradora |
+| 1 vez/semana si el proyecto tiene `api_request_logs` activos | Lanzar aunque no haya 10 tareas |
+| Nunca 2 exploradoras en paralelo sobre mismo proyecto | 1 es suficiente, son baratas pero no gratis |
+
+No es por tarea. Es 10% overhead, no 100%.
+
+## 3. Contrato del sub-agente (solo lectura)
+
+```
+ENTRADA:
+  - project: pino2 / planer-portal / etc. (cd /opt/apps/<project> ya hecho)
+  - ventana: últimos 7 días de logs
+  - qué NO tocar: código, BD, checklist, HANDOFFs
+
+SALIDA (obligatoria):
+  - archivo: metodologia/resultados-subagentes/exploradora_YYYY-MM-DD.txt
+  - formato por hallazgo:
+    [ATAJO|SOSPECHOSO|NO-ES-ATAJO] archivo:linea o tabla/query → qué se declara vs qué hace
+    Evidencia: SELECT/EXPLAIN real, no suposición
+    Propuesta: índice/SP/vista + impacto estimado (ms antes → ms después)
+    Costo: 1 tarea hormiguita (ej: "crear índice idx_ventas_fecha")
+```
+
+**Reglas:**
+1. SOLO lee (SELECT, EXPLAIN, grep). Nunca `CREATE INDEX`, `DROP`, `UPDATE`.
+2. Severidad obligatoria: ATAJO (atajo real, medible) / SOSPECHOSO / NO-ES-ATAJO.
+3. Cada hallazgo exige evidencia real (`duration_ms`, `EXPLAIN Seq Scan`, `pg_stat`).
+4. Si no hay `consultasql_historial` ni `api_request_logs`, lo declara: "sin datos para explorar".
+
+## 4. Qué busca (prioridad)
+
+1. **Consultas lentas >1s** (`04`): 
+   ```sql
+   SELECT query_text, duration_ms, caller_context 
+   FROM consultasql_historial 
+   WHERE duration_ms > 1000 AND created_at > NOW() - INTERVAL '7 days'
+   ORDER BY duration_ms DESC LIMIT 10;
+   -- luego EXPLAIN (ANALYZE, BUFFERS) por cada una
+   ```
+2. **Requests lentos >1s aunque 200 OK** (`05`):
+   ```sql
+   SELECT route_pattern, AVG(duration_ms), MAX(duration_ms), COUNT(*)
+   FROM api_request_logs 
+   WHERE duration_ms > 1000 AND created_at > NOW() - INTERVAL '7 days'
+   GROUP BY route_pattern ORDER BY AVG DESC;
+   ```
+3. **Índices faltantes:** `Seq Scan` en EXPLAIN + columnas en WHERE/JOIN/ORDER BY sin índice (`pg_stat_user_indexes`, `pg_stat_user_tables`).
+4. **Duplicación:** mismo SQL parametrizado en 2+ `repos::fn` sin vista/índice compartido.
+
+## 5. Cómo el principal decide
+
+La exploradora NO modifica el plan. El principal (vos) lee su TXT y:
+
+- Si `ATAJO` con evidencia sólida → crea 1 TAREA hormiguita nueva:
+  `TAREA: crear índice idx_X (ANTES 1200ms → DESPUÉS <100ms, EXPLAIN Index Scan)` → pasa por ciclo PLAN→PRUEBAS→COMPLETADA normal.
+- Si `SOSPECHOSO` → lo deja en backlog, no bloquea.
+- Si `NO-ES-ATAJO` o sin datos → descarta sin costo.
+
+Costo real: 1 sub-agente cada 10 tareas ≈ 10% overhead. Beneficio: evita que el plan se fosilice.
+
+## 6. Script helper
+
+```bash
+# lista candidatos lentos sin lanzar sub-agente (check rápido)
+metodologia/scripts/exploradora.sh --check --project pino2
+
+# genera prompt listo para lanzar sub-agente explorador
+metodologia/scripts/exploradora.sh --prompt --project pino2
+```
+
+Ver `scripts/exploradora.sh`.
+
+## 7. Métrica
+
+Registrar por sesión en checklist: `exploradoras lanzadas / atajos propuestos / atajos convertidos en tarea`.
+Meta: 1 exploradora cada 10 tareas, ≥1 atajo útil cada 3 exploraciones. Si 0 atajos en 5 exploraciones, bajar frecuencia a 5%.
+
+## 8. Ejemplo real de salida
+
+```
+[ATAJO] consultasql_historial: query "SELECT * FROM ventas WHERE fecha BETWEEN $1 AND $2" → 1800ms, Seq Scan en ventas.fecha
+Evidencia: EXPLAIN muestra Seq Scan, 0 índices en ventas.fecha, 340k filas
+Propuesta: CREATE INDEX CONCURRENTLY idx_ventas_fecha ON ventas(fecha) — estimado 1800→90ms
+Costo: 1 tarea hormiguita (crear índice + EXPLAIN antes/después en Bdplaner_Test)
+```
+
+Fuente: regla 38 en `00_METODO_TRABAJO.yaml`, `04` y `05` para logs.

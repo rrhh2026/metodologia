@@ -1,0 +1,23 @@
+---
+tarea: metodologia-v2
+proyecto: metodologia
+topic_key: system/metodologia
+version: 2.1.0
+estado: COMPLETADO
+docs: 19
+formato: yaml-frontmatter+markdown
+origen: /opt/apps/metodologia/
+---
+# Metodología v2 — YAML frontmatter + Markdown body
+
+Fuente viva en /opt/apps/metodologia/*.yaml con frontmatter YAML validable + cuerpo Markdown.
+MD originales quedan archivados.
+
+## Formato
+- Cada doc: frontmatter YAML (tarea/proyecto/topic_key/version) delimitado por `---` + body Markdown
+- Validar frontmatter: `python3 -c "import yaml, re; yaml.safe_load(re.search(r'^---\s*\n(.*?)\n---', open('00_METODO_TRABAJO.yaml').read(), re.S|re.M).group(1))"`
+- Buscar: `grep topic_key /opt/apps/metodologia/*.yaml`
+- Engram: `engram search "kardex" --project pino2` usa topic_key de 07_ENGRAM_MEMORIA.yaml
+
+## Por qué v2
+Ver 10_DOCUMENTO_YAML.yaml — ahorro 60% tokens, RAG O(1), delegación <10k principal.

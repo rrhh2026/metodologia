@@ -1,0 +1,133 @@
+---
+tarea: metodologia-00_router
+proyecto: metodologia
+topic_key: system/metodologia
+version: 2.1.0
+origen: /opt/apps/metodologia/00_ROUTER.md
+titulo: "00 — ROUTER DE DECISIÓN — ¿Qué hago ahora?"
+formato: yaml-frontmatter+markdown
+estado: migrado
+---
+## Contenido migrado de /opt/apps/metodologia/00_ROUTER.md
+
+# 00 — ROUTER DE DECISIÓN — ¿Qué hago ahora?
+
+> Si solo leés uno, leé `00_RESUMEN_1_PAGINA.yaml`. Si querés saber QUÉ PIEZAS aplicar, leé este.
+
+## Árbol de decisión
+
+```
+¿Qué tipo de cambio vas a hacer?
+│
+├─ 🎨 UI solamente (CSS, layout, componente, i18n)
+│   Riesgo: BAJO
+│   Leer: 01 (Playwright) + 02 (3 capas: solo capa 1+2, sin BD)
+│   Verificar: click + estado UI
+│   Sub-agentes: 0
+│   Batallón FP: NO
+│   Exploradora: NO
+│   Tokens estimados: ~10-20k
+│
+├─ ⚙️ Backend sin BD (lógica handler, DTO, validación, middleware)
+│   Riesgo: MEDIO
+│   Leer: 01 + 02 (3 capas completas) + 05 (API log)
+│   Verificar: click + estado + BD (SELECT antes/después)
+│   Sub-agentes: 0-1
+│   Batallón FP: NO
+│   Exploradora: NO
+│   Tokens estimados: ~25-40k
+│
+├─ 🗄️ Backend + BD/SP (handler + repo + SP + tabla)
+│   Riesgo: ALTO
+│   Leer: 01 + 02 + 04 (consultas lentas) + 05 (API log)
+│   Verificar: 3 capas completas + HANDOFF
+│   Sub-agentes: 1-2 (regla 25)
+│   Batallón FP: SÍ — 2 agentes, sector del cambio
+│   Exploradora: NO (salvo que sea la tarea #10)
+│   Tokens estimados: ~50-80k
+│
+├─ 🆕 Módulo / feature nuevo
+│   Riesgo: MÁXIMO
+│   Leer: TODOS (00-08)
+│   Verificar: mockup primero (regla 26) → 3 capas → E2E negocio
+│   Sub-agentes: 2-4 (regla 25)
+│   Batallón FP: SÍ — 3-4 agentes, cobertura amplia
+│   Exploradora: después de completar (si es tarea #10)
+│   Tokens estimados: ~100-150k
+│
+├─ 🐛 Fix de bug reportado por QA (con CÁPSULA `16`)
+│   Riesgo: depende de dónde toca
+│   Leer: 05 (qué pasó en servidor) + 16 (cápsula: quién/dónde/con qué datos) → lo que aplique según sector
+│   Verificar: aterrizar en la cápsula (re-ejecutar sus params) → fix → 3 capas del flujo afectado
+│   Sub-agentes: 0-1
+│   Batallón FP: NO (ya sabés dónde está el bug)
+│   Exploradora: NO
+│   Tokens estimados: ~20-35k
+│
+├─ 🔍 Auditoría / revisión de código
+│   Riesgo: N/A (solo lectura)
+│   Leer: 04 + 05 + 08
+│   Verificar: N/A
+│   Sub-agentes: 3-4 (batallón) + 1 (exploradora)
+│   Batallón FP: SÍ — cobertura por sectores
+│   Exploradora: SÍ
+│   Tokens estimados: ~50-80k
+│
+└─ 📊 Optimización / performance
+    Riesgo: MEDIO
+    Leer: 04 (consultas lentas) + 08 (exploradora)
+    Verificar: EXPLAIN antes/después + 3 capas del flujo afectado
+    Sub-agentes: 1 (exploradora) + 1 (aplicar índice/fix)
+    Batallón FP: NO
+    Exploradora: SÍ (es la tarea)
+    Tokens estimados: ~30-50k
+```
+
+## Checklist universal (SIEMPRE, sin importar el tipo)
+
+```
+[ ] 1. cd /opt/apps/<proyecto>
+[ ] 2. engram search "<módulo>" --project <proyecto> --limit 5
+[ ]    → filtrar hits needs_review (regla 37) → re-validar vs documento
+[ ] 3. Identificar topic_key: dominio/módulo (ej: sales/pricing)
+[ ] 4. Declarar tarea en 1-2 líneas: qué + prueba de éxito
+[ ] 5. Ejecutar según el tipo de cambio (árbol arriba)
+[ ] 6. mem_save con topic_key al cerrar micro-tarea
+[ ] 7. Actualizar SESSION_LOG (métricas)
+[ ] 8. mem_session_summary al cerrar sesión
+```
+
+## ¿Cuándo escalar?
+
+```
+Señales de que necesitás SUBIR el nivel de verificación:
+- El cambio "solo UI" resulta que llama un endpoint nuevo → sube a MEDIO
+- El fix de bug toca un SP → sube a ALTO
+- Cualquier DROP/DELETE/TRUNCATE → MÁXIMO (regla 30)
+
+Señales de que podés BAJAR:
+- Ya existe test Playwright que cubre ese flujo exacto → batallón NO
+- El cambio es idempotente (re-correr no cambia nada) → batallón NO
+- Es refactor sin cambio de comportamiento → solo compilar + tests existentes
+```
+
+## Documentos por referencia rápida
+
+| Doc | Cuándo leerlo |
+|-----|---------------|
+| `00_RESUMEN_1_PAGINA.yaml` | Primera vez, o recordar el ciclo |
+| `00_METODO_TRABAJO.yaml` | Reglas detalladas, sub-agentes, relevo |
+| `00_ROUTER.yaml` | **Este** — qué piezas aplicar según el cambio |
+| `01` | Siempre (Playwright) |
+| `02` | Siempre que hay BD (3 capas) |
+| `03` | Solo si querés validar visual (opcional) |
+| `04` | Cuando hay queries o performance |
+| `05` | Cuando hay backend (API log) |
+| `06` | Solo Flutter |
+| `07` | Siempre (Engram) |
+| `08` | Cada 10 tareas o auditoría |
+| `14` | Comparativa con industria y roadmap mejoras |
+| `16` | Bug reportado por QA (cápsula tiempo+espacio) |
+| `contratos/` | Cuando delegás a sub-agente |
+
+Fuente de verdad: este archivo + `00_METODO_TRABAJO.yaml`. Si hay conflicto, `00_METODO_TRABAJO.yaml` manda.

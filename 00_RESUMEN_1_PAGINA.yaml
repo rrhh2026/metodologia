@@ -1,0 +1,41 @@
+---
+tarea: metodologia-00_resumen_1_pagina
+proyecto: metodologia
+topic_key: system/metodologia
+version: 2.1.0
+origen: /opt/apps/metodologia/00_RESUMEN_1_PAGINA.md
+titulo: "00 — RESUMEN 1 PÁGINA — Si solo leés uno, leé este"
+formato: yaml-frontmatter+markdown
+estado: migrado
+---
+## Contenido migrado de /opt/apps/metodologia/00_RESUMEN_1_PAGINA.md
+
+# 00 — RESUMEN 1 PÁGINA — Si solo leés uno, leé este
+
+**Para 1 solo con múltiples proyectos. 2 minutos y ya sabés trabajar.**
+
+## Ciclo hormiguita (siempre, sin excepción)
+```
+PLAN (1 línea: qué + cómo se prueba) → TAREA (1-3 archivos, 1-2 SPs) → PRUEBAS (tsc + SELECT + curl real) → HANDOFF (dónde quedó) → siguiente
+```
+- No cambios en bloque. Una tarea verificada antes de la siguiente.
+- RAG manual: lee el archivo fuente al inicio de cada tarea.
+
+## 3 capas (si toca BD)
+```
+click (getByRole) → estado (toBeVisible/waitForURL) → BD (SELECT Antes → flujo → SELECT Después = -1)
+```
+Si no cambió datos, no probaste.
+
+## Siempre
+- **Bitácora HANDOFF** `HANDOFF_<tarea>.yaml` con `ESTADO/AVANCE/VERIFICADO/DÓNDE QUEDÓ` — si te saturás, el próximo releva sin repetir. **Evaporación 37** → `scripts/evaporar.sh --check` (>7d → `evaporado`).
+- **Memoria Engram `07`** → `project` = edificio (pino2/configcode), `topic_key` = departamento (`sales/pricing`, `inventory/kardex`) — `cd /opt/apps/<proyecto>` antes de empezar, `search` al inicio (filtra `needs_review`), `save` con topic_key al cerrar tarea, `session_summary` al cerrar sesión.
+- **Log sí o sí** `api_request_logs` `05` — todo backend loguea `method/url/status/duration/user/store` para que cualquier IA no ande a ciegas. **SQL Server:** bugs de todos los sistemas en UNA tabla `SIGHO1.dbo.SistemaLog` (columna `sistema`); Postgres lleva las suyas (`04` §5).
+- **Cápsula QA `16`** — todo reporte trae tiempo+espacio (quién/dónde/con qué datos/qué pide) para que el investigador aterrice sin reconstruir; rama bug del router: `05 → 16 → sector`.
+- **Query lenta >1s** `04` → `consultasql_historial` + `EXPLAIN ANALYZE` → la explora la **hormiga exploradora** (regla 38).
+- **Exploradora 38** → 1 de cada 10 tareas busca atajo (índice/SP mejor) sin tocar el plan.
+
+## Detalle
+¿Necesitás cómo? → `00_METODO_TRABAJO.yaml` (ciclo) → `01` (Playwright) → `02` (3 capas) → `03` (UX visual) → `04` (>1s) → `05` (API log) → `07` (Engram).
+
+**Documento manda.** Si dudás, pregunta, no asumas.

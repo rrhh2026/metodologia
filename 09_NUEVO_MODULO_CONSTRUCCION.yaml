@@ -1,0 +1,131 @@
+---
+tarea: metodologia-09_nuevo_modulo_construccion
+proyecto: metodologia
+topic_key: system/metodologia
+version: 2.0.0
+origen: /opt/apps/metodologia/09_NUEVO_MODULO_CONSTRUCCION.md
+titulo: "09 — CONSTRUCCIÓN DE NUEVOS MÓDULOS (NATIVE TOPIC_KEY & YAML)"
+formato: yaml
+estado: migrado
+---
+## Contenido migrado de /opt/apps/metodologia/09_NUEVO_MODULO_CONSTRUCCION.md
+
+# 09 — CONSTRUCCIÓN DE NUEVOS MÓDULOS (NATIVE TOPIC_KEY & YAML)
+
+> Guía estricta para crear cualquier módulo nuevo desde cero.
+> Diseñado para que la memoria (Engram), la estructura y los HANDOFFs nazcan ordenados y NUNCA requieran mapeo o limpieza posterior.
+
+---
+
+## 1. Regla de Oro: El `topic_key` nace ANTES del código
+
+Al concebir un módulo nuevo, se define su taxonomía canónica:
+```
+dominio/modulo
+```
+
+### Tabla de Taxonomía Inicial (Ejemplos):
+| Proyecto | Módulo nuevo a construir | `topic_key` canónico |
+|---|---|---|
+| `pino2` | Facturación Electrónica | `sales/e-invoicing` |
+| `pino2` | Control de Mermas | `inventory/shrinkage` |
+| `porta-planer` | Requisición de Personal | `requisitions/workflow` |
+| `asistencia` | Marcación Facial | `biometrics/face-recognition` |
+
+> [!IMPORTANT]
+> Nunca comiences a codificar ni a crear archivos sin registrar este `topic_key` en Engram y en el HANDOFF inicial.
+
+---
+
+## 2. Protocolo de Inicio de Módulo (Paso a Paso)
+
+```
+[1. DEFINIR TAXONOMÍA]   --> topic_key: dominio/submodulo
+          │
+[2. REGISTRAR EN ENGRAM] --> mem_save type: architecture topic_key: <key> (Contrato & Alcance)
+          │
+[3. CREAR HANDOFF YAML]  --> HANDOFF_<modulo>.yaml (Con frontmatter estructurado)
+          │
+[4. CONSTRUCCIÓN 3 CAPAS]--> Mockup -> DB/SP -> API -> UI Playwright
+          │
+[5. CIERRE DE SESIÓN]    --> mem_save con topic_key + SESSION_LOG
+```
+
+---
+
+## 3. Estructura de Archivos Estándar del Módulo
+
+Todo nuevo módulo en el backend o frontend debe reflejar su `topic_key` en su estructura de directorios cuando sea posible:
+
+```text
+src/
+└── modules/
+    └── <modulo>/
+        ├── <modulo>.controller.ts
+        ├── <modulo>.service.ts
+        ├── dto/
+        │   └── <modulo>.dto.ts
+        └── entities/ o repos/
+```
+
+---
+
+## 4. Inicialización en Engram (Comando Obligatorio)
+
+Antes de crear código, inicializa el módulo en la memoria persistente:
+
+```bash
+engram save "Arquitectura inicial del módulo <nombre>" \
+  --project <nombre_proyecto> \
+  --type architecture \
+  --topic-key <dominio/modulo> \
+  "What: Creación de endpoints y modelos para <modulo>
+Why: Requerimiento de negocio <motivo>
+Where: backend/src/modules/<modulo> / frontend/src/pages/<modulo>
+Scope: Endpoints /api/v1/<modulo>, tablas p_<modulo>"
+```
+
+---
+
+## 5. El HANDOFF Obligatorio en Formato YAML (`.yaml`)
+
+Todo pase de guardia o seguimiento de construcción del módulo debe crearse como archivo `.yaml` (o `.md` con Frontmatter YAML estricto):
+
+```yaml
+---
+tarea: construccion_modulo_<nombre>
+proyecto: <proyecto>
+topic_key: <dominio/modulo>
+rentabilidad: alta
+valor: "Permite automatizar <flujo>, reemplaza proceso manual de X horas"
+coordinador:
+  - P1: Creación de tablas y SPs
+  - P2: Endpoints backend y DTOs
+  - P3: Interfaz UI y 3 capas Playwright
+ultimo_agente: subagente-constructor-2026-08-27
+estado: en_progreso
+evaporado: null
+---
+
+## Avance
+- [x] P1: Tabla creada y verificada con SELECT
+- [ ] P2: Pendiente DTO y controller
+
+## Verificado
+- Tablas creadas en esquema de pruebas y migration ejecutada con éxito.
+
+## Donde quedo
+- Implementar controlador `backend/src/modules/<modulo>/<modulo>.controller.ts`
+
+## Errores
+- Ninguno
+```
+
+---
+
+## 6. Verificación en Construcción (3 Capas)
+
+No dar por terminado el módulo sin su prueba de 3 capas según `01_TESTING_UI_PLAYWRIGHT.yaml` y `02_VERIFICACION_TRES_CAPAS.yaml`:
+1. **Capa 1:** Botones semánticos (`getByRole`).
+2. **Capa 2:** Respuesta UI / Feedback observable.
+3. **Capa 3:** Registro persistido en BD real (`SELECT count(*) / SELECT *`).

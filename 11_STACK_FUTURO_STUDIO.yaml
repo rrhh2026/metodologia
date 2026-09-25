@@ -1,0 +1,98 @@
+---
+tarea: metodologia-11_stack_futuro_studio
+proyecto: metodologia
+topic_key: system/stack
+version: 1.0.0
+titulo: "11 — STACK PARA NUEVO PROYECTO — Qué elegir y por qué (perf vs token vs IA)"
+formato: yaml
+estado: activo
+origen: conversacion pino2 2026-08-27 (Svelte vs React, Marko, TOON/YAML, backend/BD)
+---
+## Contenido — Guía para iniciar nuevo proyecto en /opt/apps/<nuevo>
+
+# 11 — STACK PARA NUEVO PROYECTO
+
+> Decisión ANTES de `engram save` inicial. Elegir stack según prioridad del studio: **perf crítica** vs **ecosistema/hiring** vs **token-efficiency**. No hay stack único — este doc evita elegir React por inercia.
+
+## 1. Frontend — token cost real (22 patrones component-party.dev, cl100k_base, baseline svelte5 2072)
+
+| Framework | Tokens | vs Svelte | vs React | Cuándo |
+|---|---|---|---|---|
+| **Marko** (eBay, 2012) | 1611 | -22% | -41% | Mínimo absoluto, streaming SSR. 0 ecosistema IA (pocos miles repos) → alucina |
+| **Svelte 5 Runes** | 2072 | baseline | -25% | **Perf crítica** (15kb vs 55kb React, TTI 0.6s vs 1.2s, sin VDOM). Recomendado studio 1-10 devs |
+| **Vue 3** | 2459 | +19% | -11% | Balance SFC + Pinia + Nuxt. Vapor Mode sin VDOM |
+| **React 19** | 2755 | +33% | baseline | **Rey IA** (10M repos vs 2M Vue vs 0.4M Svelte) → 0 alucinación, v0/Lovable/Bolt nativo. Paga 33% más tokens |
+| **Angular** | 4172 | +101% | +51% | El más caro — evitar salvo enterprise Angular |
+
+> Conclusión 2026-06-17 hackernoon: React gasta más pero la IA lo genera mejor. Svelte gasta menos y es más rápido. Elegí por prioridad del studio, no por hype.
+
+### 1.1 Svelte NO es solo estática — corrección del mito
+
+- Svelte = lenguaje componentes. **SvelteKit** = framework full-stack (SSR/SPA/SSG/streaming/API routes/Actions/websockets). `adapter-static` es opcional; `adapter-node/vercel` es dinámico 100%. Para pino2 con kardex en vivo `32→31` y cierre `diff 0`, SvelteKit es ideal. No es "para landing".
+
+### 1.2 Recomendación por prioridad del studio
+
+- **Perf crítica (tu caso):** Svelte 5 + SvelteKit
+- **Balance:** Vue 4 Vapor Mode + Nuxt
+- **Ecosistema/hiring masivo:** React 19 + Next (Forget Compiler) — pagás tokens, ganás precisión IA
+
+## 2. Backend — mismo tradeoff
+
+| Stack | Tokens/handler | Perf | IA conoce | Cuándo |
+|---|---|---|---|---|
+| **Hono / Elysia + Bun** | -30% vs Nest | 2-3× Node | Alta | **Recomendado perf + JS/TS unificado**. Minimalista, sin decorators |
+| **NestJS** | baseline verbose | Media | **Máxima** | Si equipo domina Nest (como pino2). 3 capas ya probadas `<0.3ms` en 557k rows — cuello es BD/índice, no framework |
+| **Go Fiber/Gin** | Baja | Alta | Media | Si studio escala Go |
+| **Rust Axum** | Baja | Máxima | Baja | Solo eBay-scale |
+
+> No cambiar de Prestart por token si cuello es `EXPLAIN` + índice (ver 04/08 exploradora).
+
+## 3. Base de Datos
+
+- **PostgreSQL** — rey transaccional (`sales`, `kardex FOR UPDATE`, `cash_shifts`). Para pino2 y todo studio con `ACID + diff 0`. No cambiar por token.
+- ORM: **Drizzle** sobre Prisma (Prisma genera cliente verboso → más tokens). Drizzle es Svelte de los ORM.
+- Analítico: agregar **ClickHouse/Timescale** solo si agregaciones pesadas; edge: **Neon/Supabase**.
+
+## 4. Formato de datos — qué gasta menos token (prueba real pino2 2026-08-27, 200 productos)
+
+| Formato | Bytes | Tokens (o200k) | vs JSON pretty | Uso en studio |
+|---|---|---|---|---|
+| JSON pretty | 35.874 | 8.968 | baseline | Solo debug |
+| JSON min | 28.673 | 7.167 | -20% | **Output parsable** `JSON.parse()` |
+| YAML | 28.126 | 7.031 | -22% | **HANDOFF nested** `tarea/proyecto/topic_key/coordinador` — precisión top en modelos chicos (+17pts vs XML) |
+| MD strict table | 18.484 | 4.620 | -48% | **Fallback universal** — todo modelo lo conoce |
+| **TOON** `fields:` | **16.351** | **4.087** | **-54%** | **Bulk tabular homogéneo** — header 1 vez, -42% vs YAML, lossless 200/200 |
+
+- Nested (HANDOFF `coordinador P1..P4`): YAML 75 vs TOON 76 → empate → YAML manda por precisión.
+- Tabular (catálogo 7183 productos): TOON ahorra ~175k tokens vs YAML.
+
+### 4.1 Herramientas TOON
+
+- CLI `toon` (toonformat.dev/cli), Python `pip install json2toon`, NPM `@programsmagic/toon-*`, MCP `chaindead/tooner`, VSCode `vishalraut.vscode-toon`
+- Few-shot obligatorio para Sonnet/Haiku (Opus 4.6 nativo): `fields: a,b,c\nval1,val2,val3`
+
+### 4.2 Checklist formato (ver 10_DOCUMENTO_YAML.yaml)
+
+```
+¿Nested con jerarquía? → YAML
+¿Lista homogénea 50+ filas? → TOON con fields: (si controlás agente) o MD strict si no
+¿Lo parsea Node/Python? → JSON min al final, tras razonar libre
+```
+
+## 5. Protocolo al iniciar nuevo proyecto
+
+```bash
+[1] Elegir stack con este doc (perf vs IA vs tokens) → registrar decisión
+[2] cd /opt/apps/<nuevo> && engram save "Stack <nombre>" --project <nuevo> --type architecture --topic-key system/stack "What: SvelteKit + Hono + PG + Drizzle Why: perf crítica Where: ..."
+[3] Crear HANDOFF_stack_inicial.yaml con proyecto/topic_key system/stack/rentabilidad alta
+[4] Estructura src/modules/<dominio>/<modulo> refleja topic_key (ver 09)
+[5] 3 capas desde día 1 (01+02): Playwright + psql SELECT real — no stub
+```
+
+## 6. Fuentes
+
+- Frontend tokens: ryanatkn gist component-party.dev 22 patrones + hackernoon 2026-06-17
+- Formatos: webmaster-ramos 450 calls Claude (TOON -62%), improvingagents YAML +17pts, SamuelLHuber benchmarks, pino2 prueba 200 productos 2026-08-27
+- Marko: markojs.com / eBay launch 2021-02-11 (OpenJS Foundation, streaming HTML, compile 2×)
+
+> Regla oro: Si no está en YAML con topic_key, no existe para Engram. Formato se elige por dirección (input YAML/TOON vs output JSON min), no por gusto.

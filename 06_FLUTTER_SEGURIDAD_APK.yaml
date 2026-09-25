@@ -1,0 +1,48 @@
+---
+tarea: metodologia-06_flutter_seguridad_apk
+proyecto: metodologia
+topic_key: system/metodologia
+version: 2.0.0
+origen: /opt/apps/metodologia/06_FLUTTER_SEGURIDAD_APK.md
+titulo: "06 — FLUTTER SEGURIDAD APK — Núcleo Interno vs Perímetro Cliente (OBLIGATORIO SÍ O SÍ)"
+formato: yaml
+estado: migrado
+---
+## Contenido migrado de /opt/apps/metodologia/06_FLUTTER_SEGURIDAD_APK.md
+
+# 06 — FLUTTER SEGURIDAD APK — Núcleo Interno vs Perímetro Cliente (OBLIGATORIO SÍ O SÍ)
+
+**Tipo:** OBLIGATORIO SÍ O SÍ para equipo de 1 con múltiples APKs. Si `flutterv2` lo tiene cualquiera, la ingeniería inversa ve todo aunque haya RLS. Complementa a `05_API_REST_LOG`.
+
+## Regla del usuario (extremista = correcto para POS con caja)
+
+`flutterv2` `com.pinogroup.operaciones` con 20 features `sales/preventa/warehouse/despacho` es **núcleo interno no distribuible** — nunca sale de tu equipo. `flutter`/`flutter_cliente` son **perímetros por cliente** — solo lo suyo. Separar así evita que filtrar 1 `apk` exponga tu todo.
+
+## Qué hacer (1 día, barato)
+
+**Build `flutterv2` interno:**
+- `flutter build apk --obfuscate --split-debug-info=./symbols --release` + `proguard-rules.pro` + `extractNativeLibs="false"`
+- `flutter_secure_storage 9.0.0` para `JWT 15m` + `refresh 7d` + `pinning` `dio` `rhclaroni.com` + `playIntegrity` + `root` detect
+- Guardar `JWT` en `secure_storage`, nunca `shared_preferences`; `store_id` viene de `POST /auth/login` `storeIds[]`, no quemado en `lib/`
+
+**Backend frontera real:**
+- `RLS FORCE` `migrations/2026-08-23_rls_store.sql` 7 tablas + `set_config('app.store_id')` `database.service.ts:116` — aunque cambien `X-Store-Id`, PG responde 0
+- `device binding` `device_id` + `FCM token` + `rateLimit 20/min` `main.ts:90`
+- `api_request_logs` `05` con `store_id/user_agent/ip` `api-logs.service.ts:1` — 100 `GET /products` raros se cortan y alertan
+
+**Distribución:**
+- `flutterv2` = interno, mismo `keystore`, no se distribuye por WhatsApp
+- `flutter_cliente` = único que ve el cliente, como `flavor` `clienteA` con `applicationIdSuffix`, mismo `libapp.so` base + `stores.settings JSONB` flag, no codebase separado
+- Distribuir por `Firebase App Distribution` con grupo + expiración 30d
+
+## Qué evitar
+
+- No quemar `store_id` en Dart, no 3 `pubspec.yaml` `pino_mobile` mismo `name`, no `apk` por WhatsApp, no `flutter_cliente` con lógica completa
+
+## Verificación
+
+- `apktool d` + `jadx` sobre `flutterv2` ofuscado debe tardar 10h, no 10 min
+- `mitmproxy` con `pinning` debe fallar
+- `SELECT pg_policies WHERE policyname LIKE 'rls_%'` debe dar 7, y `curl -H "X-Store-Id: B"` no ve `store A`
+
+**Si `flutterv2` se filtra, ves `libapp.so` ofuscado y PG 0 — pero mejor que nunca se filtre.**

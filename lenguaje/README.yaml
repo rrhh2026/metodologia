@@ -1,0 +1,49 @@
+---
+tarea: indice-lenguajes-metodologia
+proyecto: metodologia
+topic_key: system/lenguaje/index
+version: 1.0.0
+titulo: "ÍNDICE DE LENGUAJES & ARQUITECTURA MODERNA — Svelte 5 + Hono 4 + Drizzle + PostgreSQL + UI Systems"
+formato: yaml
+estado: activo
+---
+# ÍNDICE DE LENGUAJES Y GUÍAS TÉCNICAS AVANZADAS
+
+Esta carpeta contiene la documentación canónica, patrones de producción y configuraciones avanzadas para el stack oficial de desarrollo rápido y alto rendimiento.
+
+## 📚 Módulos y Guías Disponibles:
+
+1. **`01_HONO_AVANZADO.yaml`**:
+   - Arquitectura basada en RegExpRouter y `@hono/node-server`.
+   - Tipado estricto de contexto (`Variables` y `Bindings`).
+   - Middleware de observabilidad no bloqueante (Metodología 04+05).
+   - Validación declarativa con Zod OpenAPI (`@hono/zod-validator`).
+   - Streaming de binarios de alta velocidad (PDFKit y ExcelJS).
+   - Server-Sent Events (SSE) para actualizaciones en vivo.
+
+2. **`02_SVELTE5_RUNES_AVANZADO.yaml`**:
+   - Runes reactivas: `$state`, `$state.raw`, `$derived`, `$derived.by`, `$props`, `$bindable`, `$effect`, `$effect.pre`.
+   - Snippets reutilizables con `{#snippet}` y `{@render}`.
+   - Manejo de estado global en archivos `.svelte.ts`.
+   - Arquitectura sin Virtual DOM ni overhead de memoria.
+
+3. **`03_DRIZZLE_ORM_AVANZADO.yaml`**:
+   - Modelado relacional declarativo con `relations()`.
+   - Relational queries con `with` (cero boilerplate de JOINs).
+   - Transacciones ACID atómicas con rollback automático (`db.transaction`).
+   - Consultas dinámicas con filtros combinados (`and`, `ilike`, `eq`).
+   - Operaciones avanzadas en columnas JSONB.
+
+4. **`04_POSTGRESQL_OPTIMIZACION_AVANZADA.yaml`**:
+   - Estrategias de indexación: B-Tree, B-Tree Compuesto, GIN para JSONB, Índices Parciales y Expresiones.
+   - Diagnóstico y tuning con `EXPLAIN (ANALYZE, BUFFERS)`.
+   - Concurrencia y colas seguras con `FOR UPDATE SKIP LOCKED`.
+   - Políticas de retención y purga por lotes.
+
+5. **`05_DISENO_SISTEMAS_UI_PATRONES.yaml`**:
+   - Filosofía Zero-Popup y máxima densidad informativa.
+   - Design Tokens corporativos (paleta Claro `#DA291C`).
+   - Wizard reactivo de 4 pasos sin popups.
+   - DataTables accesibles con micro-KPIs, filtros reactivos y paginación.
+   - Expediente 360° con visor de firmas y acciones inline.
+   - Referencias GitHub: `shadcn-svelte`, `Bits UI`, `Lucide Icons`.

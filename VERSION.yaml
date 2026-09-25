@@ -1,0 +1,10 @@
+---
+version: 2.3.0
+fecha: 2026-09-25
+base: /opt/apps/metodologia
+cambio: "Nuevo doc 17 (CASO CAPSULA: trabajar un bug con cápsula, caso Kevin/Metas)"
+mantiene: "MD originales archivados, no tocados"
+migrados: 19
+nuevos: 16_CAPSULA_QA, 17_CASO_CAPSULA_METAS
+estado: COMPLETADO
+---

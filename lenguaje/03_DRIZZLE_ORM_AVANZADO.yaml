@@ -1,0 +1,137 @@
+---
+tarea: guia-drizzle-orm-avanzado
+proyecto: metodologia
+topic_key: system/lenguaje/drizzle
+version: 1.0.0
+titulo: "DRIZZLE ORM — Guía Avanzada de Modelado, Transacciones, Relaciones y Consultas Complejas"
+formato: yaml
+estado: activo
+---
+# DRIZZLE ORM — GUÍA AVANZADA PARA POSTGRESQL
+
+## 1. Principios de Diseño
+- **SQL-Like First:** No inventa un lenguaje nuevo; escribe TypeScript que mapea 1:1 a SQL puro sin capas de abstracción pesadas.
+- **Cero Runtime Overhead:** A diferencia de TypeORM/Prisma, Drizzle genera SQL estático rápido con tipos inferidos en tiempo de compilación.
+- **Soporte Nativo de PostgreSQL:** JSONB, UUID, Arrays `text[]`, Generación de columnas e índices compuestos.
+
+---
+
+## 2. Esquema Relacional con `relations()`
+```ts
+import { pgTable, serial, varchar, text, numeric, integer, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { relations } from 'drizzle-orm';
+
+export const solicitudes = pgTable('dnc_solicitudes', {
+  id: serial('id').primaryKey(),
+  folio: varchar('folio', { length: 30 }).unique().notNull(),
+  nombreCapacitacion: varchar('nombre_capacitacion', { length: 200 }).notNull(),
+  costoEstimado: numeric('costo_estimado', { precision: 12, scale: 2 }),
+  estado: varchar('estado', { length: 30 }).default('BORRADOR').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull()
+});
+
+export const participantes = pgTable('dnc_participantes', {
+  id: serial('id').primaryKey(),
+  solicitudId: integer('solicitud_id').references(() => solicitudes.id, { onDelete: 'cascade' }).notNull(),
+  carnet: varchar('carnet', { length: 20 }).notNull(),
+  nombreCompleto: varchar('nombre_completo', { length: 200 }).notNull()
+});
+
+export const solicitudesRelations = relations(solicitudes, ({ many }) => ({
+  participantes: many(participantes)
+}));
+
+export const participantesRelations = relations(participantes, ({ one }) => ({
+  solicitud: one(solicitudes, {
+    fields: [participantes.solicitudId],
+    references: [solicitudes.id]
+  })
+}));
+```
+
+---
+
+## 3. Relational Queries con `with` (Zero JOIN Boilerplate)
+```ts
+// Cargar Solicitud con todos sus participantes y aprobaciones en una sola consulta estructurada
+const expediente = await db.query.solicitudes.findFirst({
+  where: (s, { eq }) => eq(s.id, solicitudId),
+  with: {
+    participantes: {
+      columns: { carnet: true, nombreCompleto: true }
+    }
+  }
+});
+```
+
+---
+
+## 4. Transacciones ACID Atómicas con Rollback Automático
+```ts
+export async function crearSolicitudConParticipantes(data: NuevaSolicitud, listaParticipantes: Participante[]) {
+  return await db.transaction(async (tx) => {
+    // 1. Insertar Cabecera
+    const [sol] = await tx.insert(solicitudes).values(data).returning();
+
+    // 2. Insertar Detalle en Bloque
+    if (listaParticipantes.length > 0) {
+      await tx.insert(participantes).values(
+        listaParticipantes.map(p => ({
+          solicitudId: sol.id,
+          carnet: p.carnet,
+          nombreCompleto: p.nombreCompleto
+        }))
+      );
+    }
+
+    // 3. Crear Circuito de Firmas Automático
+    await tx.insert(aprobaciones).values([
+      { solicitudId: sol.id, orden: 1, rol: 'JEFE_INMEDIATO', estado: 'PENDIENTE' },
+      { solicitudId: sol.id, orden: 2, rol: 'GERENTE_AREA', estado: 'PENDIENTE' }
+    ]);
+
+    return sol;
+  });
+}
+```
+
+---
+
+## 5. Consultas Dinámicas con Filtros Condicionales
+```ts
+import { and, eq, ilike, gte, lte, SQL } from 'drizzle-orm';
+
+export async function buscarSolicitudesFiltradas(filtros: {
+  gerencia?: string;
+  estado?: string;
+  busqueda?: string;
+  periodo?: number;
+}) {
+  const conditions: SQL[] = [];
+
+  if (filtros.gerencia) conditions.push(eq(solicitudes.gerencia, filtros.gerencia));
+  if (filtros.estado) conditions.push(eq(solicitudes.estado, filtros.estado));
+  if (filtros.periodo) conditions.push(eq(solicitudes.periodoFiscal, filtros.periodo));
+  if (filtros.busqueda) {
+    conditions.push(ilike(solicitudes.nombreCapacitacion, `%${filtros.busqueda}%`));
+  }
+
+  return await db.select()
+    .from(solicitudes)
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .orderBy(solicitudes.id);
+}
+```
+
+---
+
+## 6. Operaciones Avanzadas en JSONB
+```ts
+import { sql } from 'drizzle-orm';
+
+// Búsqueda en payloads estructurados dentro de PostgreSQL
+const logs = await db.select()
+  .from(apiRequestLogs)
+  .where(sql`${apiRequestLogs.requestBody}->>'categoria' = 'TECNICA'`)
+  .limit(50);
+```

@@ -1,0 +1,119 @@
+---
+tarea: metodologia-04_auditoria_logs_y_consultas_lentas
+proyecto: metodologia
+topic_key: system/metodologia
+version: 2.1.0
+origen: /opt/apps/metodologia/04_AUDITORIA_LOGS_Y_CONSULTAS_LENTAS.md
+titulo: "04. METODOLOGÍA OBLIGATORIA: AUDITORÍA DE LOGS DE ERRORES Y CONSULTAS LENTAS (>1s)"
+formato: yaml
+estado: migrado
+---
+## Contenido migrado de /opt/apps/metodologia/04_AUDITORIA_LOGS_Y_CONSULTAS_LENTAS.md
+
+# 04. METODOLOGÍA OBLIGATORIA: AUDITORÍA DE LOGS DE ERRORES Y CONSULTAS LENTAS (>1s)
+
+## 📌 Principio Fundamental
+Todo sistema de software en producción y desarrollo debe contar con una arquitectura de observabilidad activa basada en base de datos. Ningún error o cuello de botella debe quedar sin registrar.
+
+---
+
+## 1. Tabla Obligatoria de Logs de Errores y Peticiones (`api_request_logs` / `error_logs`)
+
+Cada sistema debe almacenar structured logs en PostgreSQL con los siguientes campos mínimos:
+
+| Columna | Tipo | Propósito |
+| :--- | :--- | :--- |
+| `id` | `uuid` | Identificador único del evento. |
+| `log_level` | `varchar(10)` | Nivel (`ERROR`, `WARN`, `INFO`, `CRITICAL`). |
+| `method` | `varchar(10)` | Método HTTP (`GET`, `POST`, `PUT`, `DELETE`). |
+| `url` / `route_pattern` | `text` | Ruta invocada y patrón parametrizado. |
+| `status_code` | `smallint` | Código de estado HTTP retornado (4xx, 5xx). |
+| `duration_ms` | `integer` | Tiempo total de procesamiento en milisegundos. |
+| `user_id` / `user_email`| `uuid` / `varchar` | Usuario autenticado o solicitante. |
+| `store_id` | `uuid` | Identificador de sucursal / tenant (RLS). |
+| `request_body` | `jsonb` | Payload entrante sanitizado (sin contraseñas). |
+| `response_body` | `jsonb` | Respuesta o detalle del error retornado. |
+| `error_message` | `text` | Mensaje descriptivo de la excepción. |
+| `error_stack` | `text` | Stack trace completo con archivo y línea. |
+| `created_at` | `timestamp` | Fecha y hora exacta del suceso. |
+
+---
+
+## 2. Monitoreo Obligatorio de Consultas Lentas (>1 Segundo / 1,000 ms)
+
+### ⏱️ Umbral Crítico
+Cualquier consulta SQL ejecutada contra PostgreSQL cuya duración sea **mayor a 1,000 milisegundos (1 segundo)** debe ser interceptada y almacenada automáticamente en la tabla `consultasql_historial` / `slow_query_logs`.
+
+### 📋 Campos Obligatorios del Registro de Rendimiento:
+1. **Query Text:** Texto exacto del SQL ejecutado.
+2. **Parámetros:** Array de parámetros enviados ($1, $2, etc.).
+3. **Duración:** Tiempo exacto de ejecución en milisegundos (`duration_ms > 1000`).
+4. **Filas Afectadas:** Número de filas leídas o retornadas (`row_count`).
+5. **Caller Context:** Módulo, servicio o endpoint que disparó la consulta.
+6. **Fecha y Hora:** Timestamp del incidente.
+
+### 🛠️ Flujo de Corrección Inmediata para Consultas Lentas:
+* Ejecutar `EXPLAIN (ANALYZE, BUFFERS)` sobre la consulta registrada.
+* Verificar ausencia de índices en columnas de `JOIN`, `WHERE`, `ORDER BY` y `GROUP BY`.
+* Reemplazar escaneos secuenciales masivos (`Seq Scan`) por búsquedas indexadas (`Index Scan` / `Bitmap Index Scan`).
+* Migrar consultas dinámicas con agregaciones complejas a vistas materializadas o índices compuestos.
+
+---
+
+## 3. Integración en Testing Automatizado y Diagnóstico de Fallos
+
+Las pruebas de integración y E2E (Playwright / Jest) deben incorporar helpers de diagnóstico que:
+1. **Verifiquen la persistencia de logs:** Comprobar que peticiones anómalas o con error generen el registro respectivo en base de datos.
+2. **Extracción automática en fallos:** Si un test falla en la capa UI o API, el ejecutor debe consultar automáticamente `api_request_logs` y `error_logs` e imprimir el stack trace del backend en el reporte final para identificar la causa raíz sin suposiciones.
+
+---
+
+## 4. Política de Retención y Purga Nocturna (02:00 AM)
+
+Para evitar el crecimiento indefinido del almacenamiento:
+* Implementar una tarea programada (`@Cron('0 2 * * *')`) que ejecute:
+  ```sql
+  DELETE FROM api_request_logs WHERE created_at < NOW() - INTERVAL '7 days';
+  DELETE FROM error_logs WHERE created_at < NOW() - INTERVAL '7 days';
+  DELETE FROM consultasql_historial WHERE created_at < NOW() - INTERVAL '7 days';
+  ```
+* Esto asegura un historial suficiente para auditorías recientes manteniendo un rendimiento óptimo de la base de datos.
+
+---
+
+## 5. Centralización SQL Server: UN solo lugar para los bugs de TODOS los sistemas (alcance: SOLO SQL Server)
+
+### Regla
+Todo sistema que use **SQL Server** registra sus bugs en **UNA sola tabla central** en `SIGHO1` (propuesta: `SIGHO1.dbo.SistemaLog`), con columna `sistema` que identifica qué app lo generó. Por más sistemas que tengamos, el bug cae en un solo lugar y se filtra por `sistema`.
+
+### No aplica a Postgres
+Cada BD **Postgres** lleva sus propias tablas (`api_request_logs` / `error_logs`, §1). No se centraliza cross-DB: lo de Postgres lo lleva cada sistema en su propia base.
+
+### DDL propuesta (crear una sola vez en SIGHO1)
+```sql
+CREATE TABLE SIGHO1.dbo.SistemaLog (
+  id          BIGINT IDENTITY(1,1) PRIMARY KEY,
+  sistema     VARCHAR(50)  NOT NULL,  -- ej: 'portal','medico','encuesta',' nomi'
+  fecha       DATETIME2    NOT NULL DEFAULT SYSDATETIME(),
+  nivel       VARCHAR(10)  NOT NULL DEFAULT 'ERROR',  -- ERROR/WARN/INFO/CRITICAL
+  modulo      VARCHAR(200) NULL,      -- SP, endpoint o pantalla que falló
+  mensaje     NVARCHAR(MAX) NOT NULL,
+  stack       NVARCHAR(MAX) NULL,
+  carnet      VARCHAR(20)  NULL,      -- usuario/empleado si hay
+  datos       NVARCHAR(MAX) NULL      -- JSON con params sanitizados (sin passwords)
+);
+CREATE INDEX IX_SistemaLog_sistema_fecha ON SIGHO1.dbo.SistemaLog (sistema, fecha DESC);
+```
+
+### Uso
+```sql
+-- Registrar (cada sistema pone su nombre en @sistema)
+INSERT INTO SIGHO1.dbo.SistemaLog (sistema, nivel, modulo, mensaje, stack, carnet, datos)
+VALUES ('portal', 'ERROR', 'sp_Visibilidad_ObtenerCarnets', @msg, @stack, @carnet, @json);
+
+-- Ver bugs de un sistema
+SELECT TOP 50 * FROM SIGHO1.dbo.SistemaLog WHERE sistema = 'portal' ORDER BY fecha DESC;
+```
+
+### Retención
+Misma política que §4: purga nocturna, borrar lo mayor a 7 días (por `sistema` si se quiere conservar alguno más tiempo).
