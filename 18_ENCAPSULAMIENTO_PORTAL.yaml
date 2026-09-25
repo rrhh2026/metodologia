@@ -1,0 +1,249 @@
+---
+tarea: metodologia-18_encapsulamiento_portal
+proyecto: metodologia
+topic_key: system/metodologia
+version: 2.4.0
+origen: /opt/apps/metodologia/18_ENCAPSULAMIENTO_PORTAL.md
+titulo: "18 — ENCAPSULAMIENTO PORTAL — Montar un frontend como requisiciones"
+formato: yaml-frontmatter+markdown
+estado: COMPLETADO
+---
+## Contenido migrado de /opt/apps/metodologia/18_ENCAPSULAMIENTO_PORTAL.md
+
+# 18 — ENCAPSULAMIENTO PORTAL — Montar un frontend como requisiciones
+
+> Patrón verificado en `/opt/apps/requisiciones/frontend`. Copiar tal cual, cambiando solo el nombre del módulo.
+
+## Contrato (6 piezas, todas obligatorias)
+
+1. `base` de Vite = prefijo portal
+2. Routing manual sobre ese prefijo (sin router externo)
+3. Cáscara fija: Sidebar + top-navbar + content-body
+4. `API_BASE` frontend = prefijo API del módulo
+5. Backend Hono montado en ese mismo prefijo API + `getEffectiveUser` + `api_rest_log`
+6. SSO por `?token=` + `carnet` en localStorage
+
+## Ejemplo completo — módulo `vacaciones` (copiar y renombrar)
+
+### 1. `frontend/vite.config.ts`
+
+```ts
+import { defineConfig } from 'vite';
+import { svelte } from '@sveltejs/vite-plugin-svelte';
+
+export default defineConfig({
+  plugins: [svelte()],
+  base: '/portal/vacaciones/', // <-- CAMBIAR por tu módulo
+  server: {
+    port: 5191, // <-- puerto libre, requisiciones usa 5190
+    host: '0.0.0.0',
+    proxy: {
+      '/api': {
+        target: 'http://127.0.0.1:3120', // <-- tu backend
+        changeOrigin: true
+      }
+    }
+  }
+});
+```
+
+### 2. `frontend/src/lib/api.ts`
+
+```ts
+const API_BASE = '/api/vacaciones'; // <-- CAMBIAR por tu módulo
+
+function getHeaders(qaCarnet?: string) {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  const carnet = qaCarnet || localStorage.getItem('vac_qa_carnet') || localStorage.getItem('vac_user_carnet') || '';
+  headers['x-qa-carnet'] = carnet;
+  return headers;
+}
+
+async function safeJson(res: Response) {
+  const contentType = res.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    const text = await res.text();
+    return { success: false, message: `Error en el servidor (${res.status}): ${text.slice(0, 150)}` };
+  }
+  return res.json();
+}
+
+export const api = {
+  async getMias(qaCarnet?: string) {
+    const res = await fetch(`${API_BASE}/mias`, { headers: getHeaders(qaCarnet) });
+    const data = await safeJson(res);
+    return data.data || [];
+  },
+  async crear(payload: any, qaCarnet?: string) {
+    const res = await fetch(`${API_BASE}`, {
+      method: 'POST',
+      headers: getHeaders(qaCarnet),
+      body: JSON.stringify(payload),
+    });
+    return safeJson(res);
+  },
+};
+```
+
+### 3. `backend/src/index.ts` (montaje Hono)
+
+```ts
+import { serve } from '@hono/node-server';
+import { Hono } from 'hono';
+import { cors } from 'hono/cors';
+import { logger } from 'hono/logger';
+import { vacacionesRouter } from './routes/vacaciones.js'; // <-- CAMBIAR por tu módulo
+
+const app = new Hono();
+
+app.use('*', logger());
+
+// CORS portal: localhost + *.claro.com.ni, headers de identidad
+app.use('*', cors({
+  origin: (origin) => {
+    if (!origin) return '*';
+    try {
+      const u = new URL(origin);
+      if (u.hostname === 'localhost' || u.hostname === '127.0.0.1' || u.hostname.endsWith('.claro.com.ni')) return origin;
+    } catch {}
+    return 'http://127.0.0.1:3120';
+  },
+  allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowHeaders: ['Content-Type', 'Authorization', 'x-qa-carnet', 'x-user-carnet']
+}));
+
+app.get('/health', (c) => c.json({ status: 'healthy', service: 'vacaciones-api' }));
+
+// <-- CAMBIAR prefijo: debe ser idéntico al API_BASE del frontend
+app.route('/api/vacaciones', vacacionesRouter);
+
+serve({ fetch: app.fetch, port: parseInt(process.env.PORT || '3120', 10) });
+```
+
+### 4. `backend/src/routes/vacaciones.ts` (identidad + SP)
+
+```ts
+import { Hono } from 'hono';
+import { executeQuery, TYPES } from '../db.js';
+
+export const vacacionesRouter = new Hono();
+
+// Identidad: sale del header, nunca del body (regla 9)
+async function getEffectiveUser(c: any) {
+  const carnet = (c.req.header('x-qa-carnet') || c.req.header('x-user-carnet') || '').trim();
+  if (!carnet) return c.json({ success: false, message: 'Falta x-qa-carnet' }, 401);
+  return { carnet, nombre: 'Usuario Claro' };
+}
+
+vacacionesRouter.get('/mias', async (c) => {
+  const u: any = await getEffectiveUser(c);
+  if (u.status === 401) return u;
+  const rows = await executeQuery('EXEC dbo.sp_Vacacion_ListarMias @P1', [
+    { name: 'P1', type: TYPES.VarChar, value: u.carnet },
+  ]);
+  return c.json({ success: true, data: rows });
+});
+
+vacacionesRouter.post('/', async (c) => {
+  const u: any = await getEffectiveUser(c);
+  if (u.status === 401) return u;
+  const body = await c.req.json();
+  const rows = await executeQuery('EXEC dbo.sp_Vacacion_Crear @P1, @P2', [
+    { name: 'P1', type: TYPES.VarChar, value: u.carnet },
+    { name: 'P2', type: TYPES.NVarChar, value: JSON.stringify(body) },
+  ]);
+  return c.json({ success: true, data: rows[0] ?? null });
+});
+```
+
+### 5. `frontend/src/App.svelte` (routing + cáscara mínima)
+
+```svelte
+<script lang="ts">
+  import { onMount } from 'svelte';
+  import Sidebar from './lib/Sidebar.svelte';
+  import MisVacacionesView from './lib/MisVacacionesView.svelte';
+  import CrearVacacionView from './lib/CrearVacacionView.svelte';
+
+  const PREFIJO = '/portal/vacaciones'; // <-- CAMBIAR por tu módulo
+
+  let currentView = $state<'mias' | 'crear' | 'revisar'>('mias');
+  let selectedId = $state<number | null>(null);
+  let qaCarnet = $state(localStorage.getItem('vac_qa_carnet') || '');
+
+  function parseUrlRoute() {
+    const pathname = window.location.pathname.replace(/\/$/, '');
+    const parts = pathname.split('/').filter(Boolean);
+    // e.g. /portal/vacaciones/revisar/68 -> parts: ['portal', 'vacaciones', 'revisar', '68']
+    const sub = parts[2];
+    const param = parts[3];
+    if (sub === 'crear') currentView = 'crear';
+    else if (sub === 'revisar' && param) { currentView = 'revisar'; selectedId = parseInt(param, 10); }
+    else currentView = 'mias';
+  }
+
+  function updateBrowserUrl(view: string, id: number | null = null) {
+    let path = `${PREFIJO}/mias`;
+    if (view === 'crear') path = `${PREFIJO}/crear`;
+    else if (view === 'revisar' && id) path = `${PREFIJO}/revisar/${id}`;
+    window.history.pushState({ view, id }, '', path + window.location.search);
+  }
+
+  onMount(() => {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('token');
+    const carnetParam = params.get('carnet');
+    if (token) {
+      localStorage.setItem('auth_token', token);
+      const cleanUrl = new URL(window.location.href);
+      cleanUrl.searchParams.delete('token');
+      window.history.replaceState({}, '', cleanUrl.pathname + cleanUrl.search + cleanUrl.hash);
+    }
+    if (carnetParam) {
+      qaCarnet = carnetParam;
+      localStorage.setItem('vac_qa_carnet', carnetParam);
+      localStorage.setItem('vac_user_carnet', carnetParam);
+    }
+    parseUrlRoute();
+    window.addEventListener('popstate', parseUrlRoute);
+    return () => window.removeEventListener('popstate', parseUrlRoute);
+  });
+</script>
+
+<div class="layout-container">
+  <Sidebar bind:currentView onViewSelect={(v) => { currentView = v; updateBrowserUrl(v); }} />
+  <div class="main-wrapper">
+    <header class="top-navbar"><h2>Mis Vacaciones</h2></header>
+    <main class="content-body">
+      {#if currentView === 'mias'}
+        <MisVacacionesView {qaCarnet} onVerDetalle={(id) => { selectedId = id; currentView = 'revisar'; updateBrowserUrl('revisar', id); }} />
+      {:else if currentView === 'crear'}
+        <CrearVacacionView {qaCarnet} onBack={() => { currentView = 'mias'; updateBrowserUrl('mias'); }} />
+      {/if}
+    </main>
+  </div>
+</div>
+```
+
+### 6. Checklist de montaje (no dar por hecho sin esto)
+
+```
+[ ] base en vite.config.ts = /portal/<modulo>/
+[ ] npm run build genera dist/ con assets bajo ese base
+[ ] API_BASE = /api/<modulo> responde (curl 200)
+[ ] Entrar a /portal/<modulo>/mias directo (F5) no da 404
+[ ] ?token= se guarda y se limpia de la URL
+[ ] back/forward del navegador cambia de vista
+```
+
+## Errores que ya vimos (no repetir)
+
+- `base: '/'` → al montarlo en el portal los assets dan 404. Siempre `base: '/portal/<modulo>/'` con slashes.
+- Router externo con `BrowserRouter` sin `basename` → deep-link roto. O se usa `basename='/portal/<modulo>'` o routing manual como arriba.
+- Leer identidad del body en vez del JWT/carnet en storage → mezclar sesiones QA. La identidad sale del token + localStorage, nunca del body.
+
+## Referencia real
+
+`/opt/apps/requisiciones/frontend/vite.config.ts` (base) + `/opt/apps/requisiciones/frontend/src/App.svelte` (routing/SSO/cáscara) + `/opt/apps/requisiciones/frontend/src/lib/api.ts` (API_BASE/headers/anillo) + `/opt/apps/requisiciones/backend/src/index.ts` (mount `/api/requisiciones` + CORS + api_rest_log) + `/opt/apps/requisiciones/backend/src/routes/requisiciones.ts` (getEffectiveUser + SPs).
