@@ -1,0 +1,100 @@
+---
+tarea: metodologia-17_caso_encapsulamiento_requisiciones
+proyecto: metodologia
+topic_key: system/metodologia
+version: 1.0.0
+titulo: "17 — CASO ENCAPSULAMIENTO — Cómo quedó montado requisiciones (caso real)"
+formato: yaml-frontmatter+markdown
+estado: nuevo
+---
+## Contenido
+
+# 17 — CASO ENCAPSULAMIENTO — Requisiciones montado en el portal (caso real)
+
+**Principio: el ejemplo genérico está en el 18; acá está el caso real que lo prueba.**
+Todo valor de abajo es el que está HOY en `/opt/apps/requisiciones`, no un placeholder.
+Si el 18 y este 17 difieren, manda este 17 (la realidad manda sobre la plantilla).
+
+## El módulo
+
+- Frontend: Svelte 5 + Vite 6 (`frontend/package.json`), vive en `/portal/requisiciones/`
+- Backend: Hono 4 + tedious (`backend/package.json`), puerto 3120, prefijo `/api/requisiciones`
+- 13 vistas en `frontend/src/lib/*View.svelte` + `Sidebar.svelte`, sin router externo
+
+## Pieza por pieza (valores reales)
+
+### 1. `base` — `frontend/vite.config.ts:6`
+
+```ts
+base: '/portal/requisiciones/',
+server: { port: 5190, host: '0.0.0.0', proxy: { '/api': { target: 'http://127.0.0.1:3120', changeOrigin: true } } }
+```
+
+Con `base: '/'` los assets daban 404 montado en el portal. Con el base del módulo, `npm run build` genera `dist/` con rutas que resuelven bajo el portal.
+
+### 2. Routing — `frontend/src/App.svelte:101-162`
+
+Sin router externo. `parseUrlRoute()` lee `parts[2]` (sub-vista) y `parts[3]` (id):
+
+```
+e.g. /portal/requisiciones/revisar/68 -> parts: ['portal', 'requisiciones', 'revisar', '68']
+```
+
+`updateBrowserUrl(view, id)` reconstruye `/portal/requisiciones/...` con `pushState`.
+`previousView` guarda de dónde vino para el botón Volver. `popstate` re-parsa la URL.
+Deep-link directo (`/revisar/68`, `/acta/68`) y F5 funcionan.
+
+### 3. Cáscara — `frontend/src/App.svelte:304-416`
+
+Fija: `Sidebar` + `top-navbar` (título por vista + selector QA) + `content-body` con `{#if currentView}`.
+Agregar una vista = un `lib/*View.svelte` + una rama del `if` + ruta en `parse/update`.
+`CapsulaReporte` vive fuera del layout (flotante, `App.svelte:417`).
+
+### 4. API — `frontend/src/lib/api.ts:1`
+
+```ts
+const API_BASE = '/api/requisiciones';
+```
+
+Identidad por header `x-qa-carnet` (de `localStorage req_qa_carnet/req_user_carnet`), nunca del body.
+`safeJson` tolera respuestas no-JSON. Anillo de últimas 20 llamadas (método+url+status+ms, sin tokens) para la coordenada CON QUÉ DATOS de la cápsula (doc 16).
+
+### 5. Backend — `backend/src/index.ts:92`
+
+```ts
+app.route('/api/requisiciones', requisicionesRouter);
+```
+
+Mismo prefijo que el `API_BASE` del frontend (si difieren, todo da 404 y el bug es ese).
+Encima: `logger` + telemetría a `dbo.api_rest_log` (metodología 05) + CORS
+(`localhost`, `127.0.0.1`, `*.claro.com.ni`; headers `x-qa-carnet/x-user-carnet`) + `GET /health`.
+
+### 6. Identidad + SP — `backend/src/routes/requisiciones.ts`
+
+`getEffectiveUser(c)` lee `x-qa-carnet || x-user-carnet` (header, nunca body) y valida contra `dbo.p_Usuarios`.
+Cada endpoint llama su SP, ej. `GET /mias → EXEC dbo.sp_Requisicion_ListarMias_rust @P1`.
+
+### 7. SSO — `frontend/src/App.svelte:164-208`
+
+`?token=` → `localStorage auth_token` → se borra de la URL (sin recarga, no queda en historial/logs).
+`?carnet=` → `req_qa_carnet/req_user_carnet`. Sin token ni carnet, cae al QA por defecto.
+
+### 8. Iconos — `frontend/src/lib/Sidebar.svelte:2`
+
+```ts
+import { Briefcase, Building2, Clock, Layers, Users, PlusCircle, BarChart3, Upload, Snowflake, TrendingUp, ArrowRightLeft } from 'lucide-svelte';
+```
+
+Un import por vista con solo los usados. `size={18}` en nav, `size={16}` en botones. Nav sin emojis.
+
+## Cómo reusarlo
+
+1. Copiá la plantilla del 18 (módulo `vacaciones`).
+2. Verificá cada pieza contra ESTE 17 (valores reales arriba), no contra tu memoria del 18.
+3. Pasá el checklist del 18 (`### 7`).
+
+## Integra con
+
+- `18_ENCAPSULAMIENTO_PORTAL.yaml` — plantilla genérica copiable de este caso.
+- `16_CAPSULA_QA.yaml` — el anillo de `api.ts` alimenta su coordenada CON QUÉ DATOS.
+- `05_API_REST_LOG.yaml` — telemetría del `index.ts` del backend.

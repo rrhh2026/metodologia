@@ -1,10 +1,10 @@
 ---
-version: 2.4.0
+version: 2.5.0
 fecha: 2026-09-25
 base: /opt/apps/metodologia
-cambio: "Nuevo doc 18 (ENCAPSULAMIENTO PORTAL: ejemplo frontend + backend copiable, patrón requisiciones)"
+cambio: "17 reemplazado: CASO real de encapsulamiento (requisiciones); se retira CASO CAPSULA Metas"
 mantiene: "MD originales archivados, no tocados"
 migrados: 19
-nuevos: 16_CAPSULA_QA, 17_CASO_CAPSULA_METAS, 18_ENCAPSULAMIENTO_PORTAL
+nuevos: 16_CAPSULA_QA, 17_CASO_ENCAPSULAMIENTO_REQUISICIONES, 18_ENCAPSULAMIENTO_PORTAL
 estado: COMPLETADO
 ---
